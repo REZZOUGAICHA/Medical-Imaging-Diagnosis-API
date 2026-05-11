@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pillow
+numpy
+grad-cam
+python-multipart
+prometheus-fastapi-instrumentator
