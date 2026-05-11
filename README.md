@@ -1,5 +1,7 @@
 # Medical Imaging Diagnosis API
 
+![CI](https://github.com/REZZOUGAICHA/Medical-Imaging-Diagnosis-API/actions/workflows/ci.yml/badge.svg)
+
 A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, and a Grad-CAM heatmap explaining which regions of the image drove the prediction.
 
 Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Fully containerized with monitoring via Prometheus and Grafana.
