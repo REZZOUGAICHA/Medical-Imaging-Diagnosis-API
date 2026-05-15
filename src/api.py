@@ -2,6 +2,8 @@ import io
 import os
 import torch
 import httpx
+from dotenv import load_dotenv
+load_dotenv()
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from PIL import Image
