@@ -1,6 +1,7 @@
 import io
 import os
 import torch
+import httpx
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from PIL import Image
@@ -117,3 +118,48 @@ async def predict_endpoint(file: UploadFile = File(...)):
         "gradcam_heatmap": result["gradcam_heatmap"],
         "disclaimer":      "This tool is for research purposes only and does not constitute medical advice."
     })
+
+
+@app.post("/explain")
+async def explain_endpoint(body: dict):
+    hf_token = os.environ.get("HF_TOKEN")
+    if not hf_token:
+        raise HTTPException(status_code=503, detail="Explanation service not configured.")
+
+    class_name  = body.get("class_name", "")
+    confidence  = body.get("confidence", 0)
+    probs       = body.get("probabilities", {})
+
+    top_probs = ", ".join(
+        f"{k} {v*100:.1f}%"
+        for k, v in sorted(probs.items(), key=lambda x: x[1], reverse=True)[:3]
+    )
+
+    prompt = (
+        f"A retinal fundus image was analyzed by an AI model for diabetic retinopathy screening. "
+        f"Prediction: {class_name} with {confidence*100:.1f}% confidence. "
+        f"Top probabilities: {top_probs}. "
+        f"The Grad-CAM attention map highlights the retinal regions that drove this prediction. "
+        f"Write a 3-sentence clinical explanation covering: what this diagnosis means, "
+        f"what retinal features are typically associated with {class_name}, "
+        f"and what follow-up action is recommended."
+    )
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            "https://api-inference.huggingface.co/models/google/flan-t5-large",
+            headers={"Authorization": f"Bearer {hf_token}"},
+            json={"inputs": prompt, "parameters": {"max_new_tokens": 200}}
+        )
+
+    if resp.status_code == 503:
+        raise HTTPException(status_code=503, detail="AI model is warming up — please try again in 20 seconds.")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"HF API error: {resp.text[:200]}")
+
+    data = resp.json()
+    text = data[0].get("generated_text", "").strip() if isinstance(data, list) else ""
+    if not text:
+        raise HTTPException(status_code=500, detail="Empty response from language model.")
+
+    return {"explanation": text}

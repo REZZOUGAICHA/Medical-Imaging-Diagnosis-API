@@ -6,3 +6,4 @@ grad-cam
 python-multipart
 prometheus-fastapi-instrumentator
 huggingface-hub
+httpx
