@@ -4,8 +4,11 @@ from torchvision import models
 from src.config import EFFICIENTNET_WEIGHTS
 
 def build_model(num_classes=5, pretrained=True):
-    model = models.efficientnet_b4(weights='IMAGENET1K_V1')
-    
+    # pretrained=True: load local fine-tuned weights from EFFICIENTNET_WEIGHTS
+    # pretrained=False: random init — used when load_model() will load state_dict immediately after
+    weights = 'IMAGENET1K_V1' if pretrained else None
+    model = models.efficientnet_b4(weights=weights)
+
     if pretrained:
         state_dict = torch.load(EFFICIENTNET_WEIGHTS, map_location='cpu')
         model.load_state_dict(state_dict)

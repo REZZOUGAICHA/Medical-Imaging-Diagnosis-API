@@ -37,7 +37,7 @@ def load_model(model_path=None, device=None):
     if model_path is None:
         model_path = SAVE_PATH
 
-    model = build_model(num_classes=NUM_CLASSES)
+    model = build_model(num_classes=NUM_CLASSES, pretrained=False)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
