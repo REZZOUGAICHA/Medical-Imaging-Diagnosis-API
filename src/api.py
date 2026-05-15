@@ -1,13 +1,25 @@
 import io
+import os
 import torch
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
 from PIL import Image
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram
+from huggingface_hub import hf_hub_download
 
 from src.predict import load_model, predict, predict_with_explainability
-from src.config import SAVE_PATH
+from src.config import SAVE_PATH, MODELS_DIR
+
+HF_REPO_ID = "aicharzg/diabetic-retinopathy-efficientnet-b4"
+
+if not os.path.exists(SAVE_PATH):
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    hf_hub_download(
+        repo_id=HF_REPO_ID,
+        filename="best_model.pth",
+        local_dir=MODELS_DIR,
+    )
 
 
 app = FastAPI(
