@@ -2,31 +2,31 @@
 
 ![CI](https://github.com/REZZOUGAICHA/Medical-Imaging-Diagnosis-API/actions/workflows/ci.yml/badge.svg)
 
-A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, and a Grad-CAM heatmap explaining which regions of the image drove the prediction.
+A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, a Grad-CAM heatmap, and an AI-generated clinical explanation powered by Flan-T5-Large.
 
-Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Fully containerized with monitoring via Prometheus and Grafana.
+Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a medical web UI, full monitoring via Prometheus and Grafana, 18 unit tests, and a GitHub Actions CI pipeline.
 
 > **Disclaimer:** This tool is for research purposes only and does not constitute medical advice.
+
+**Live demo:** https://medical-imaging-diagnosis-api-production.up.railway.app
 
 ---
 
 ## Architecture
 
 ```
-Client (image upload)
+Client (browser or API)
         │
         ▼
-┌───────────────────────────────────┐
-│         FastAPI  :8000            │
-│                                   │
-│  POST /predict                    │
-│    → validate image               │
-│    → EfficientNet-B4 inference    │    ┌─────────────────────┐
-│    → Grad-CAM heatmap         ────┼───▶│  models/            │
-│    → return JSON + base64 image   │    │  best_model.pth     │
-│                                   │    └─────────────────────┘
-│  GET  /metrics  (Prometheus)      │
-└───────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│              FastAPI  :8000              │
+│                                          │
+│  GET  /          → Medical web UI        │
+│  POST /predict   → EfficientNet-B4       │    ┌──────────────────────┐
+│                    + Grad-CAM heatmap ───┼───▶│  HF Hub              │
+│  POST /explain   → Flan-T5-Large NLP     │    │  best_model.pth      │
+│  GET  /metrics   → Prometheus scrape     │    └──────────────────────┘
+└──────────────────────────────────────────┘
         │  scrape /metrics every 15s
         ▼
 ┌───────────────────┐      query      ┌──────────────────────┐
@@ -37,36 +37,64 @@ Client (image upload)
 
 ---
 
+## Features
+
+- **5-class DR classification** — No DR / Mild / Moderate / Severe / Proliferative
+- **Grad-CAM explainability** — heatmap overlay showing which retinal regions drove the prediction
+- **AI clinical explanation** — Flan-T5-Large generates a natural language report for each prediction
+- **Medical web UI** — drag-and-drop upload, color-coded severity, probability bars, side-by-side image comparison
+- **Prometheus + Grafana monitoring** — latency, request counts, per-class prediction counts, confidence distribution
+- **18 unit tests** — model architecture, inference logic, API endpoints
+- **GitHub Actions CI** — tests run automatically on every push
+- **One-command Docker deployment** — `docker-compose up --build`
+
+---
+
 ## Quick Start
 
 **Requirements:** Docker and Docker Compose installed.
 
-### 1. Get model weights
-
-The trained weights are not stored in this repo (too large for git). Place your `best_model.pth` file in the `models/` directory:
-
-```
-models/
-└── best_model.pth   ← required
-```
-
-To train from scratch, see [Training](#training).
-
-### 2. Start everything
+### 1. Clone and start
 
 ```bash
+git clone https://github.com/REZZOUGAICHA/Medical-Imaging-Diagnosis-API.git
+cd Medical-Imaging-Diagnosis-API
 docker-compose up --build
 ```
+
+Model weights are downloaded automatically from [Hugging Face Hub](https://huggingface.co/aicharzg/diabetic-retinopathy-efficientnet-b4) on first startup.
 
 This starts three services:
 
 | Service    | URL                        | Purpose                         |
 |------------|----------------------------|---------------------------------|
-| API        | http://localhost:8000      | FastAPI inference server        |
+| API + UI   | http://localhost:8000      | Web UI and inference endpoints  |
 | Prometheus | http://localhost:9090      | Metrics storage                 |
 | Grafana    | http://localhost:3000      | Monitoring dashboard            |
 
 Grafana login: `admin / admin`
+
+### 2. Optional — AI explanations
+
+To enable the Flan-T5 clinical explanation feature, set your Hugging Face token:
+
+```bash
+# .env (never commit this file)
+HF_TOKEN=your_hf_token_here
+```
+
+Then restart: `docker-compose up`.
+
+---
+
+## Web UI
+
+Open **http://localhost:8000** for the interactive medical interface:
+
+1. Drag and drop a retinal fundus image (JPEG or PNG)
+2. The model returns predicted DR severity + confidence + probability distribution
+3. Grad-CAM heatmap shows which retinal regions drove the prediction
+4. Click **Generate AI Clinical Explanation** for a Flan-T5 natural language report
 
 ---
 
@@ -115,7 +143,7 @@ curl -X POST http://localhost:8000/predict \
 }
 ```
 
-The `gradcam_heatmap` field is a base64-encoded PNG overlay showing which retinal regions the model attended to. Decode it to visualize:
+Decode the heatmap to visualize:
 
 ```python
 import base64, io
@@ -125,8 +153,27 @@ img = Image.open(io.BytesIO(base64.b64decode(response["gradcam_heatmap"])))
 img.show()
 ```
 
+### `POST /explain`
+Sends prediction data to Flan-T5-Large and returns a natural language clinical explanation.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/explain \
+  -H "Content-Type: application/json" \
+  -d '{"class_name": "Moderate DR", "confidence": 0.87, "probabilities": {...}}'
+```
+
+**Response:**
+```json
+{
+  "explanation": "Moderate non-proliferative diabetic retinopathy indicates..."
+}
+```
+
+Requires `HF_TOKEN` environment variable to be set.
+
 ### `GET /metrics`
-Prometheus-format metrics endpoint. Scraped automatically — not intended for direct use.
+Prometheus-format metrics endpoint. Scraped automatically.
 
 ---
 
@@ -134,7 +181,7 @@ Prometheus-format metrics endpoint. Scraped automatically — not intended for d
 
 Once the stack is running, open Grafana at http://localhost:3000 (`admin / admin`).
 
-The Prometheus datasource is pre-configured. Key metrics to dashboard:
+The Prometheus datasource is pre-configured. Key metrics:
 
 | Metric | What it shows |
 |--------|--------------|
@@ -142,6 +189,17 @@ The Prometheus datasource is pre-configured. Key metrics to dashboard:
 | `http_requests_total` | Request volume by endpoint and status |
 | `predictions_total` | Prediction count per DR severity class |
 | `prediction_confidence` | Distribution of model confidence scores |
+
+---
+
+## Running Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+18 tests covering model architecture, inference logic, and all API endpoints. No model weights needed — tests use a mock.
 
 ---
 
@@ -179,21 +237,33 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 
 ```
 ├── src/
-│   ├── api.py          # FastAPI app and endpoints
+│   ├── api.py          # FastAPI app, endpoints, HF weight download
 │   ├── config.py       # Paths and hyperparameters
 │   ├── dataset.py      # PyTorch Dataset + augmentations
 │   ├── gradcam.py      # Grad-CAM heatmap generation
 │   ├── model.py        # EfficientNet-B4 architecture
 │   ├── predict.py      # Inference logic
 │   └── train.py        # Training pipeline
+├── static/
+│   └── index.html      # Medical web UI
+├── tests/
+│   ├── conftest.py     # Shared fixtures + model mock
+│   ├── test_api.py     # FastAPI endpoint tests
+│   ├── test_model.py   # Model architecture tests
+│   └── test_predict.py # Inference logic tests
 ├── models/             # Model weights (not tracked in git)
 ├── data/               # APTOS 2019 dataset (not tracked in git)
 ├── monitoring/
 │   ├── prometheus.yml  # Prometheus scrape config
 │   └── grafana/        # Grafana datasource provisioning
+├── .github/
+│   └── workflows/
+│       └── ci.yml      # GitHub Actions CI pipeline
 ├── Dockerfile
 ├── docker-compose.yml
-└── requirements.txt
+├── requirements.txt        # Full deps (training)
+├── requirements-api.txt    # Lean deps (API + Docker)
+└── requirements-dev.txt    # Test deps
 ```
 
 ---
@@ -202,9 +272,13 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 
 | Layer | Technology |
 |-------|-----------|
-| Model | EfficientNet-B4 (PyTorch) |
+| CV Model | EfficientNet-B4 (PyTorch) |
 | API | FastAPI + uvicorn |
 | Explainability | Grad-CAM (pytorch-grad-cam) |
+| NLP Explanation | Flan-T5-Large (Hugging Face Inference API) |
+| Web UI | Vanilla HTML/CSS/JS (served by FastAPI) |
 | Containerization | Docker + Docker Compose |
 | Monitoring | Prometheus + Grafana |
+| Model Hosting | Hugging Face Hub |
+| CI/CD | GitHub Actions + Railway |
 | Dataset | [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Kaggle) |
