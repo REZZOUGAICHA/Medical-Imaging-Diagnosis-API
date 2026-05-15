@@ -65,7 +65,8 @@ def health():
     return {
         "status": "healthy",
         "model": "EfficientNet-B4",
-        "device": str(device)
+        "device": str(device),
+        "hf_token_set": bool(os.environ.get("HF_TOKEN"))
     }
 
 
