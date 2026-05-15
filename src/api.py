@@ -1,7 +1,5 @@
 import io
 import os
-import torch
-import httpx
 from dotenv import load_dotenv
 load_dotenv()
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -11,7 +9,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram
 from huggingface_hub import hf_hub_download
 
-from src.predict import load_model, predict, predict_with_explainability
+from src.predict import load_model, predict_with_explainability
 from src.config import SAVE_PATH, MODELS_DIR, ROOT_DIR
 
 HF_REPO_ID = "aicharzg/diabetic-retinopathy-efficientnet-b4"
@@ -151,15 +149,17 @@ async def explain_endpoint(body: dict):
     )
 
     def call_hf():
-        client = InferenceClient(token=hf_token)
+        client = InferenceClient(token=hf_token, timeout=20)
         return client.text_generation(
             prompt,
-            model="google/flan-t5-large",
-            max_new_tokens=200
+            model="google/flan-t5-base",
+            max_new_tokens=150
         )
 
     try:
-        text = await asyncio.to_thread(call_hf)
+        text = await asyncio.wait_for(asyncio.to_thread(call_hf), timeout=25)
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Model took too long to respond — please try again.")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"HF API error: {str(e)}")
 
