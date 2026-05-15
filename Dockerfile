@@ -18,6 +18,7 @@ COPY requirements-api.txt .
 RUN pip install --no-cache-dir -r requirements-api.txt
 
 COPY src/ ./src/
+COPY static/ ./static/
 
 # models/ is volume-mounted at runtime — not baked into the image
 RUN mkdir -p models

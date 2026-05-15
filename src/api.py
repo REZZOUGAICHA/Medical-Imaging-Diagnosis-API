@@ -2,14 +2,14 @@ import io
 import os
 import torch
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from PIL import Image
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Histogram
 from huggingface_hub import hf_hub_download
 
 from src.predict import load_model, predict, predict_with_explainability
-from src.config import SAVE_PATH, MODELS_DIR
+from src.config import SAVE_PATH, MODELS_DIR, ROOT_DIR
 
 HF_REPO_ID = "aicharzg/diabetic-retinopathy-efficientnet-b4"
 
@@ -49,6 +49,12 @@ confidence_histogram = Histogram(
 )
 
 model, device = load_model(SAVE_PATH)
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def serve_ui():
+    with open(os.path.join(ROOT_DIR, "static", "index.html"), encoding="utf-8") as f:
+        return f.read()
 
 
 @app.get("/health")

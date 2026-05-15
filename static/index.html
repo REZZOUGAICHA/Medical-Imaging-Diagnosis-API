@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RetinalAI — Diabetic Retinopathy Screening</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --navy:      #0d1b2a;
+      --navy-2:    #1b2d42;
+      --blue:      #1565c0;
+      --blue-mid:  #1976d2;
+      --bg:        #f0f4f8;
+      --white:     #ffffff;
+      --text:      #1e293b;
+      --muted:     #64748b;
+      --border:    #e2e8f0;
+      --radius:    16px;
+      --shadow:    0 4px 24px rgba(0,0,0,0.08);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── HEADER ─────────────────────────────────────── */
+    header {
+      background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%);
+      padding: 1.25rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.35);
+    }
+    .header-icon {
+      width: 44px; height: 44px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      color: #90caf9;
+      flex-shrink: 0;
+    }
+    .header-text h1 { font-size: 1.3rem; font-weight: 700; color: #fff; letter-spacing: -0.3px; }
+    .header-text p  { font-size: 0.74rem; color: #90caf9; margin-top: 2px; }
+    .header-badge {
+      margin-left: auto;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: #90caf9;
+      font-size: 0.7rem; font-weight: 500;
+      padding: 0.35rem 0.85rem;
+      border-radius: 100px;
+      white-space: nowrap;
+    }
+
+    /* ── DISCLAIMER ──────────────────────────────────── */
+    .disclaimer-bar {
+      background: #fff8e1;
+      border-bottom: 1px solid #ffe082;
+      padding: 0.55rem 2rem;
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.74rem; color: #7c5c00;
+    }
+    .disclaimer-bar svg { flex-shrink: 0; color: #f59e0b; }
+
+    /* ── MAIN ────────────────────────────────────────── */
+    main { max-width: 980px; margin: 2.5rem auto; padding: 0 1.5rem 3rem; }
+
+    /* ── CARD SHELL ──────────────────────────────────── */
+    .card {
+      background: var(--white);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .card-header {
+      background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+      padding: 1.4rem 2rem;
+      border-bottom: 1px solid #bbdefb;
+    }
+    .card-header h2 { font-size: 1rem; font-weight: 600; color: var(--navy); }
+    .card-header p  { font-size: 0.78rem; color: var(--muted); margin-top: 3px; }
+
+    /* ── UPLOAD ZONE ─────────────────────────────────── */
+    .upload-zone {
+      margin: 2rem;
+      border: 2.5px dashed #cbd5e1;
+      border-radius: 14px;
+      padding: 3.5rem 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: #f8fafc;
+      position: relative;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--blue-mid);
+      background: #e8f4fd;
+    }
+    .upload-zone input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+    }
+    .upload-icon {
+      width: 72px; height: 72px;
+      background: linear-gradient(135deg, #1565c0, #1976d2);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 1.25rem;
+      color: white;
+      box-shadow: 0 8px 24px rgba(21,101,192,0.3);
+    }
+    .upload-zone h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .upload-zone p  { font-size: 0.84rem; color: var(--muted); }
+    .browse-link { color: var(--blue); font-weight: 500; }
+    .format-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      margin-top: 1rem;
+      background: #e2e8f0; color: #475569;
+      font-size: 0.7rem; font-weight: 500;
+      padding: 0.3rem 0.8rem; border-radius: 100px;
+    }
+
+    /* ── LOADING ─────────────────────────────────────── */
+    .loading-section { text-align: center; padding: 4.5rem 2rem; }
+    .spinner {
+      width: 52px; height: 52px;
+      border: 4px solid #e2e8f0;
+      border-top-color: var(--blue);
+      border-radius: 50%;
+      margin: 0 auto 1.5rem;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-section h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.35rem; }
+    .loading-section p  { font-size: 0.82rem; color: var(--muted); }
+
+    /* ── SEVERITY BANNER ─────────────────────────────── */
+    .severity-banner {
+      padding: 1.3rem 2rem;
+      display: flex; align-items: center; gap: 1rem;
+      border-bottom: 2px solid transparent;
+    }
+    .severity-icon {
+      width: 52px; height: 52px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem; flex-shrink: 0;
+    }
+    .severity-banner h2 { font-size: 1.3rem; font-weight: 700; }
+    .severity-banner .sev-desc { font-size: 0.8rem; margin-top: 2px; opacity: 0.85; }
+    .conf-chip {
+      margin-left: auto;
+      background: rgba(0,0,0,0.1);
+      border-radius: 14px;
+      padding: 0.6rem 1.1rem;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .conf-chip .conf-val  { font-size: 1.5rem; font-weight: 800; line-height: 1; }
+    .conf-chip .conf-lbl  { font-size: 0.62rem; font-weight: 600; opacity: 0.75; letter-spacing: 0.5px; text-transform: uppercase; }
+
+    /* ── RESULTS GRID ────────────────────────────────── */
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      padding: 1.75rem 2rem 2rem;
+    }
+    @media (max-width: 660px) { .results-grid { grid-template-columns: 1fr; } }
+
+    /* Image blocks */
+    .img-col { display: flex; flex-direction: column; gap: 1rem; }
+    .img-block { border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+    .img-block-label {
+      background: #f8fafc;
+      padding: 0.5rem 0.9rem;
+      font-size: 0.7rem; font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .img-block img { width: 100%; display: block; }
+
+    /* Data panel */
+    .data-col { display: flex; flex-direction: column; gap: 1.1rem; }
+    .panel-box {
+      background: #f8fafc;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.1rem;
+    }
+    .panel-title {
+      font-size: 0.7rem; font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 0.85rem;
+    }
+
+    /* Probability bars */
+    .prob-row { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.6rem; }
+    .prob-row:last-child { margin-bottom: 0; }
+    .prob-lbl { font-size: 0.74rem; font-weight: 500; width: 130px; flex-shrink: 0; }
+    .prob-track { flex: 1; background: #e2e8f0; border-radius: 100px; height: 8px; overflow: hidden; }
+    .prob-fill  { height: 100%; border-radius: 100px; transition: width 0.9s cubic-bezier(0.16,1,0.3,1); }
+    .prob-pct   { font-size: 0.73rem; font-weight: 600; color: var(--muted); width: 38px; text-align: right; flex-shrink: 0; }
+
+    /* Clinical note */
+    .clinical-note {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-left: 4px solid #f59e0b;
+      border-radius: 10px;
+      padding: 0.95rem 1rem;
+      font-size: 0.8rem; color: #78350f; line-height: 1.55;
+    }
+    .clinical-note strong { display: block; font-weight: 600; margin-bottom: 3px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3px; }
+
+    /* Disclaimer box */
+    .result-disclaimer {
+      background: #f0f4f8;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.8rem 1rem;
+      font-size: 0.73rem; color: var(--muted); line-height: 1.5;
+    }
+
+    /* Try again bar */
+    .try-again-bar {
+      padding: 1.25rem 2rem;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .try-again-bar p { font-size: 0.74rem; color: var(--muted); }
+    .btn {
+      background: var(--blue); color: white;
+      border: none; padding: 0.65rem 1.4rem;
+      border-radius: 10px; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; transition: all 0.15s; font-family: inherit;
+    }
+    .btn:hover { background: var(--blue-mid); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(21,101,192,0.3); }
+
+    /* Error */
+    .error-box {
+      margin: 1.5rem 2rem;
+      background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444;
+      border-radius: 10px; padding: 1rem;
+      font-size: 0.84rem; color: #991b1b;
+    }
+
+    /* Footer */
+    footer { text-align: center; padding: 2rem; font-size: 0.74rem; color: var(--muted); }
+    footer a { color: var(--blue); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* Animations */
+    .fade-in { animation: fadeUp 0.4s ease both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+<!-- ── HEADER ──────────────────────────────────────────── -->
+<header>
+  <div class="header-icon">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  </div>
+  <div class="header-text">
+    <h1>RetinalAI Diagnostics</h1>
+    <p>Diabetic Retinopathy Severity Classification · Grad-CAM Explainability</p>
+  </div>
+  <span class="header-badge">EfficientNet-B4 · APTOS 2019</span>
+</header>
+
+<!-- ── DISCLAIMER BAR ──────────────────────────────────── -->
+<div class="disclaimer-bar">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+  </svg>
+  <span><strong>Research tool only.</strong> This system does not constitute clinical advice. Always consult a qualified ophthalmologist for diagnosis and treatment.</span>
+</div>
+
+<!-- ── MAIN ─────────────────────────────────────────────── -->
+<main>
+  <div class="card" id="mainCard">
+
+    <!-- Card header -->
+    <div class="card-header">
+      <h2>Upload Retinal Fundus Image</h2>
+      <p>Submit a high-quality fundus photograph for automated DR severity assessment and Grad-CAM visual explanation</p>
+    </div>
+
+    <!-- ─ UPLOAD ─────────────────────────────────────── -->
+    <div id="uploadSection">
+      <div class="upload-zone" id="uploadZone">
+        <input type="file" id="fileInput" accept="image/jpeg,image/png">
+        <div class="upload-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </div>
+        <h3>Drop your fundus image here</h3>
+        <p>or <span class="browse-link">click to browse</span> from your computer</p>
+        <div class="format-badge">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          JPEG · PNG accepted
+        </div>
+      </div>
+    </div>
+
+    <!-- ─ LOADING ─────────────────────────────────────── -->
+    <div id="loadingSection" style="display:none">
+      <div class="loading-section">
+        <div class="spinner"></div>
+        <h3>Analysing retinal image…</h3>
+        <p>Running EfficientNet-B4 inference and generating Grad-CAM attention map</p>
+      </div>
+    </div>
+
+    <!-- ─ ERROR ───────────────────────────────────────── -->
+    <div id="errorSection" style="display:none"></div>
+
+    <!-- ─ RESULTS ─────────────────────────────────────── -->
+    <div id="resultsSection" style="display:none" class="fade-in">
+
+      <!-- Severity banner -->
+      <div class="severity-banner" id="severityBanner">
+        <div class="severity-icon" id="severityIcon"></div>
+        <div>
+          <h2 id="severityLabel"></h2>
+          <div class="sev-desc" id="severityDesc"></div>
+        </div>
+        <div class="conf-chip">
+          <div class="conf-val" id="confVal"></div>
+          <div class="conf-lbl">Confidence</div>
+        </div>
+      </div>
+
+      <!-- Two-column grid -->
+      <div class="results-grid">
+
+        <!-- Images -->
+        <div class="img-col">
+          <div class="img-block">
+            <div class="img-block-label">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              Original Fundus Image
+            </div>
+            <img id="originalImg" src="" alt="Fundus image">
+          </div>
+          <div class="img-block">
+            <div class="img-block-label" style="color:#6d28d9">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                <path d="M2 17l10 5 10-5"/>
+                <path d="M2 12l10 5 10-5"/>
+              </svg>
+              Grad-CAM Attention Map
+            </div>
+            <img id="heatmapImg" src="" alt="Grad-CAM heatmap">
+          </div>
+        </div>
+
+        <!-- Data panel -->
+        <div class="data-col">
+          <div class="panel-box">
+            <div class="panel-title">Probability Distribution</div>
+            <div id="probBars"></div>
+          </div>
+          <div class="clinical-note">
+            <strong>Clinical Interpretation</strong>
+            <span id="clinicalText"></span>
+          </div>
+          <div class="result-disclaimer">
+            This prediction is generated by an AI model trained on the APTOS 2019 dataset. It is intended for research and educational use only. Do not use for clinical decision-making.
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer bar -->
+      <div class="try-again-bar">
+        <p>Model: EfficientNet-B4 &nbsp;·&nbsp; Dataset: APTOS 2019 &nbsp;·&nbsp; Explainability: Grad-CAM</p>
+        <button class="btn" onclick="resetUI()">Analyse Another Image</button>
+      </div>
+    </div>
+
+  </div><!-- /card -->
+</main>
+
+<!-- ── FOOTER ───────────────────────────────────────────── -->
+<footer>
+  Built with <a href="https://arxiv.org/abs/1905.11946" target="_blank">EfficientNet-B4</a>
+  trained on the <a href="https://www.kaggle.com/c/aptos2019-blindness-detection/data" target="_blank">APTOS 2019</a> dataset &nbsp;·&nbsp;
+  <a href="/docs" target="_blank">API Docs</a> &nbsp;·&nbsp;
+  <a href="/model-info" target="_blank">Model Info</a>
+</footer>
+
+<script>
+  const SEV = {
+    0: { emoji:'✅', color:'#14532d', bg:'#dcfce7', border:'#86efac', bar:'#16a34a' },
+    1: { emoji:'⚠️', color:'#78350f', bg:'#fef3c7', border:'#fcd34d', bar:'#d97706' },
+    2: { emoji:'🔶', color:'#7c2d12', bg:'#fff7ed', border:'#fdba74', bar:'#ea580c' },
+    3: { emoji:'🚨', color:'#7f1d1d', bg:'#fef2f2', border:'#fca5a5', bar:'#dc2626' },
+    4: { emoji:'🆘', color:'#4c0519', bg:'#ffe4e6', border:'#fda4af', bar:'#be123c' },
+  };
+
+  const fileInput  = document.getElementById('fileInput');
+  const uploadZone = document.getElementById('uploadZone');
+
+  // ─ Drag & drop ─────────────────────────────────────────
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('dragover'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('dragover');
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+  fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+
+  // ─ File selected ───────────────────────────────────────
+  function handleFile(file) {
+    if (!['image/jpeg','image/png'].includes(file.type)) {
+      showError('Only JPEG and PNG images are accepted.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = e => { document.getElementById('originalImg').src = e.target.result; };
+    reader.readAsDataURL(file);
+    uploadAndPredict(file);
+  }
+
+  // ─ API call ────────────────────────────────────────────
+  async function uploadAndPredict(file) {
+    show('loadingSection');
+    hide('uploadSection'); hide('errorSection'); hide('resultsSection');
+
+    const fd = new FormData();
+    fd.append('file', file);
+
+    try {
+      const r = await fetch('/predict', { method: 'POST', body: fd });
+      if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Prediction failed'); }
+      showResults(await r.json());
+    } catch(err) {
+      showError(err.message);
+    }
+  }
+
+  // ─ Render results ──────────────────────────────────────
+  function showResults(data) {
+    hide('loadingSection');
+    const cls = data.predicted_class;
+    const s   = SEV[cls];
+
+    // Banner
+    const banner = document.getElementById('severityBanner');
+    banner.style.background    = s.bg;
+    banner.style.borderColor   = s.border;
+    banner.style.color         = s.color;
+    document.getElementById('severityIcon').textContent          = s.emoji;
+    document.getElementById('severityIcon').style.background     = s.border;
+    document.getElementById('severityLabel').textContent         = data.class_name;
+    document.getElementById('severityDesc').textContent          = data.description;
+    document.getElementById('confVal').textContent               = (data.confidence * 100).toFixed(1) + '%';
+
+    // Heatmap
+    document.getElementById('heatmapImg').src = 'data:image/png;base64,' + data.gradcam_heatmap;
+
+    // Probability bars
+    const container = document.getElementById('probBars');
+    container.innerHTML = '';
+    Object.entries(data.probabilities).forEach(([lbl, prob], i) => {
+      const pct     = (prob * 100).toFixed(1);
+      const active  = i === cls;
+      const barCol  = active ? s.bar : '#94a3b8';
+      const lblStyle = active ? `font-weight:700;color:${s.color}` : '';
+      const pctStyle = active ? `font-weight:700;color:${s.color}` : '';
+      container.innerHTML += `
+        <div class="prob-row">
+          <div class="prob-lbl" style="${lblStyle}">${lbl}</div>
+          <div class="prob-track"><div class="prob-fill" style="width:${pct}%;background:${barCol}"></div></div>
+          <div class="prob-pct" style="${pctStyle}">${pct}%</div>
+        </div>`;
+    });
+
+    // Clinical text
+    document.getElementById('clinicalText').textContent = data.description;
+
+    // Show
+    const rs = document.getElementById('resultsSection');
+    rs.style.display = 'block';
+    rs.classList.remove('fade-in');
+    void rs.offsetWidth;
+    rs.classList.add('fade-in');
+  }
+
+  // ─ Error ───────────────────────────────────────────────
+  function showError(msg) {
+    hide('loadingSection'); show('uploadSection');
+    const el = document.getElementById('errorSection');
+    el.style.display = 'block';
+    el.innerHTML = `<div class="error-box">⚠️ <strong>Error:</strong> ${msg}</div>`;
+  }
+
+  // ─ Reset ───────────────────────────────────────────────
+  function resetUI() {
+    show('uploadSection'); hide('loadingSection'); hide('resultsSection'); hide('errorSection');
+    document.getElementById('originalImg').src = '';
+    document.getElementById('heatmapImg').src  = '';
+    fileInput.value = '';
+  }
+
+  function show(id) { document.getElementById(id).style.display = 'block'; }
+  function hide(id) { document.getElementById(id).style.display = 'none';  }
+</script>
+</body>
+</html>
