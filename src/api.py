@@ -125,13 +125,16 @@ async def predict_endpoint(file: UploadFile = File(...)):
 
 @app.post("/explain")
 async def explain_endpoint(body: dict):
+    import asyncio
+    from huggingface_hub import InferenceClient
+
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
         raise HTTPException(status_code=503, detail="Explanation service not configured.")
 
-    class_name  = body.get("class_name", "")
-    confidence  = body.get("confidence", 0)
-    probs       = body.get("probabilities", {})
+    class_name = body.get("class_name", "")
+    confidence = body.get("confidence", 0)
+    probs      = body.get("probabilities", {})
 
     top_probs = ", ".join(
         f"{k} {v*100:.1f}%"
@@ -142,27 +145,25 @@ async def explain_endpoint(body: dict):
         f"A retinal fundus image was analyzed by an AI model for diabetic retinopathy screening. "
         f"Prediction: {class_name} with {confidence*100:.1f}% confidence. "
         f"Top probabilities: {top_probs}. "
-        f"The Grad-CAM attention map highlights the retinal regions that drove this prediction. "
         f"Write a 3-sentence clinical explanation covering: what this diagnosis means, "
         f"what retinal features are typically associated with {class_name}, "
         f"and what follow-up action is recommended."
     )
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            "https://api-inference.huggingface.co/models/google/flan-t5-large",
-            headers={"Authorization": f"Bearer {hf_token}"},
-            json={"inputs": prompt, "parameters": {"max_new_tokens": 200}}
+    def call_hf():
+        client = InferenceClient(token=hf_token)
+        return client.text_generation(
+            prompt,
+            model="google/flan-t5-large",
+            max_new_tokens=200
         )
 
-    if resp.status_code == 503:
-        raise HTTPException(status_code=503, detail="AI model is warming up — please try again in 20 seconds.")
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"HF API error: {resp.text[:200]}")
+    try:
+        text = await asyncio.to_thread(call_hf)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"HF API error: {str(e)}")
 
-    data = resp.json()
-    text = data[0].get("generated_text", "").strip() if isinstance(data, list) else ""
-    if not text:
+    if not text or not text.strip():
         raise HTTPException(status_code=500, detail="Empty response from language model.")
 
-    return {"explanation": text}
+    return {"explanation": text.strip()}
