@@ -11,3 +11,8 @@ grad-cam
 mlflow
 python-multipart
 prometheus-fastapi-instrumentator
+shap
+lime
+scikit-image
+seaborn
+jupytext
