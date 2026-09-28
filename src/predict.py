@@ -1,3 +1,5 @@
+import logging
+
 import torch
 import torch.nn.functional as F
 from PIL import Image
@@ -5,6 +7,8 @@ from torchvision import transforms
 
 from src.model import build_model
 from src.config import NUM_CLASSES, IMAGE_SIZE, SAVE_PATH
+
+logger = logging.getLogger(__name__)
 
 
 CLASS_NAMES = {
@@ -42,7 +46,7 @@ def load_model(model_path=None, device=None):
     model.to(device)
     model.eval()
 
-    print(f"Model loaded from {model_path} on {device}")
+    logger.info("Model loaded from %s on %s", model_path, device)
     return model, device
 
 

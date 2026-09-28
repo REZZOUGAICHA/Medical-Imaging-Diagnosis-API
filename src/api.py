@@ -1,37 +1,84 @@
+import asyncio
 import io
+import logging
 import os
+import time
+import uuid
+from contextlib import asynccontextmanager
+
 from dotenv import load_dotenv
-load_dotenv()
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, HTMLResponse
-from PIL import Image
-from prometheus_fastapi_instrumentator import Instrumentator
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import HTMLResponse, JSONResponse
+from huggingface_hub import InferenceClient, hf_hub_download
+from PIL import Image, UnidentifiedImageError
 from prometheus_client import Counter, Histogram
-from huggingface_hub import hf_hub_download
+from prometheus_fastapi_instrumentator import Instrumentator, metrics
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from src.predict import load_model, predict_with_explainability
-from src.config import SAVE_PATH, MODELS_DIR, ROOT_DIR
+from src.config import MODELS_DIR, ROOT_DIR, SAVE_PATH
+from src.logging_config import request_id_var, setup_logging
+from src.predict import CLASS_NAMES, load_model, predict_with_explainability
+from src.schemas import (
+    ErrorResponse,
+    ExplainRequest,
+    ExplainResponse,
+    LivenessResponse,
+    ModelInfoResponse,
+    PredictResponse,
+    ReadinessResponse,
+)
 
-HF_REPO_ID = "aicharzg/diabetic-retinopathy-efficientnet-b4"
+load_dotenv()
+setup_logging()
+logger = logging.getLogger("api")
 
-if not os.path.exists(SAVE_PATH):
+HF_REPO_ID       = "aicharzg/diabetic-retinopathy-efficientnet-b4"
+EXPLAIN_MODEL    = "google/flan-t5-base"
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "10")) * 1024 * 1024
+ALLOWED_TYPES    = {"image/jpeg", "image/png"}
+DISCLAIMER       = "This tool is for research purposes only and does not constitute medical advice."
+
+
+def download_weights():
+    if os.path.exists(SAVE_PATH):
+        return
+    logger.info("Downloading weights from %s", HF_REPO_ID)
     os.makedirs(MODELS_DIR, exist_ok=True)
-    hf_hub_download(
-        repo_id=HF_REPO_ID,
-        filename="best_model.pth",
-        local_dir=MODELS_DIR,
-    )
+    hf_hub_download(repo_id=HF_REPO_ID, filename="best_model.pth", local_dir=MODELS_DIR)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.model = None
+    app.state.device = None
+
+    # if loading fails we keep running but /health/ready stays 503
+    try:
+        await run_in_threadpool(download_weights)
+        app.state.model, app.state.device = await run_in_threadpool(load_model, SAVE_PATH)
+    except Exception:
+        logger.exception("Could not load model")
+
+    hf_token = os.environ.get("HF_TOKEN")
+    app.state.hf_client = InferenceClient(token=hf_token, timeout=20) if hf_token else None
+
+    yield
 
 
 app = FastAPI(
     title="Medical Imaging Diagnosis API",
     description="Diabetic retinopathy severity classification using EfficientNet-B4",
-    version="1.0.0"
+    version="1.1.0",
+    lifespan=lifespan,
 )
 
 # Wire up automatic HTTP metrics (latency, request count, in-flight)
-# and expose them at GET /metrics for Prometheus to scrape
-Instrumentator().instrument(app).expose(app)
+# and expose them at GET /metrics for Prometheus to scrape.
+# default latency buckets stop at 1s, but /predict takes a few seconds on CPU
+Instrumentator().add(
+    metrics.default(latency_lowr_buckets=(0.1, 0.25, 0.5, 1, 2, 3, 5, 8, 15))
+).instrument(app).expose(app)
 
 # Custom metric: count predictions per DR severity class
 # labels=["predicted_class"] means each class gets its own counter line
@@ -49,7 +96,38 @@ confidence_histogram = Histogram(
     buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 )
 
-model, device = load_model(SAVE_PATH)
+ERROR_RESPONSES = {code: {"model": ErrorResponse} for code in (400, 413, 500, 502, 503, 504)}
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+    token = request_id_var.set(request_id)
+    start = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("Unhandled error")
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error.", "request_id": request_id},
+        )
+    finally:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+
+    response.headers["X-Request-ID"] = request_id
+    logger.info("%s %s %d %.0fms", request.method, request.url.path, response.status_code, elapsed_ms)
+    request_id_var.reset(token)
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "request_id": request_id_var.get()},
+        headers=exc.headers,
+    )
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -58,112 +136,107 @@ def serve_ui():
         return f.read()
 
 
-@app.get("/health")
-def health():
-    return {
-        "status": "healthy",
-        "model": "EfficientNet-B4",
-        "device": str(device),
-        "hf_token_set": bool(os.environ.get("HF_TOKEN"))
-    }
+@app.get("/health/live", response_model=LivenessResponse, tags=["health"])
+def health_live():
+    return {"status": "alive"}
 
 
-@app.get("/model-info")
+@app.get("/health", include_in_schema=False)
+@app.get("/health/ready", response_model=ReadinessResponse, tags=["health"],
+         responses={503: {"model": ReadinessResponse}})
+def health_ready(request: Request):
+    state = request.app.state
+    ready = state.model is not None
+    body = ReadinessResponse(
+        status="ready" if ready else "not_ready",
+        model_loaded=ready,
+        model="EfficientNet-B4",
+        device=str(state.device) if ready else None,
+        explanation_service=state.hf_client is not None,
+    )
+    return JSONResponse(status_code=200 if ready else 503, content=body.model_dump())
+
+
+@app.get("/model-info", response_model=ModelInfoResponse)
 def model_info():
     return {
         "model_name":  "EfficientNet-B4",
         "dataset":     "APTOS 2019 Blindness Detection",
         "task":        "Diabetic Retinopathy Classification",
-        "num_classes": 5,
+        "num_classes": len(CLASS_NAMES),
         "input_size":  "224x224 RGB",
-        "classes": {
-            "0": "No Diabetic Retinopathy",
-            "1": "Mild DR",
-            "2": "Moderate DR",
-            "3": "Severe DR",
-            "4": "Proliferative DR"
-        }
+        "classes":     {str(k): v for k, v in CLASS_NAMES.items()},
     }
 
 
-@app.post("/predict")
-async def predict_endpoint(file: UploadFile = File(...)):
-    if file.content_type not in ["image/jpeg", "image/png"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid file type: {file.content_type}. Only JPEG and PNG accepted."
-        )
+@app.post("/predict", response_model=PredictResponse, responses=ERROR_RESPONSES)
+async def predict_endpoint(request: Request, file: UploadFile = File(...)):
+    model, device = request.app.state.model, request.app.state.device
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model is not loaded yet.")
+
+    # content_type comes from the client so it's only a first check,
+    # the real check is whether PIL can open the file
+    if file.content_type not in ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG and PNG accepted.")
+
+    contents = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large (max {MAX_UPLOAD_BYTES // 2**20} MB).")
 
     try:
-        contents = await file.read()
-        image = Image.open(io.BytesIO(contents)).convert("RGB")
-    except Exception:
+        image = Image.open(io.BytesIO(contents))
+        if image.format not in ("JPEG", "PNG"):
+            raise ValueError(image.format)
+        image = image.convert("RGB")
+    except (UnidentifiedImageError, ValueError, OSError, Image.DecompressionBombError):
         raise HTTPException(status_code=400, detail="Could not decode image.")
 
+    # model + grad-cam are blocking, run them in a thread so the event loop stays free
     try:
-        result = predict_with_explainability(image, model, device)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
+        result = await run_in_threadpool(predict_with_explainability, image, model, device)
+    except Exception:
+        logger.exception("Inference failed")
+        raise HTTPException(status_code=500, detail="Inference failed.")
 
-    # Record custom metrics after every successful prediction
     predictions_counter.labels(predicted_class=str(result["predicted_class"])).inc()
     confidence_histogram.observe(result["confidence"])
 
-    return JSONResponse(content={
-        "success":         True,
-        "predicted_class": result["predicted_class"],
-        "class_name":      result["class_name"],
-        "description":     result["description"],
-        "confidence":      result["confidence"],
-        "probabilities":   result["probabilities"],
-        "gradcam_heatmap": result["gradcam_heatmap"],
-        "disclaimer":      "This tool is for research purposes only and does not constitute medical advice."
-    })
+    return PredictResponse(success=True, disclaimer=DISCLAIMER, **result)
 
 
-@app.post("/explain")
-async def explain_endpoint(body: dict):
-    import asyncio
-    from huggingface_hub import InferenceClient
-
-    hf_token = os.environ.get("HF_TOKEN")
-    if not hf_token:
+@app.post("/explain", response_model=ExplainResponse, responses=ERROR_RESPONSES)
+async def explain_endpoint(request: Request, body: ExplainRequest):
+    client = request.app.state.hf_client
+    if client is None:
         raise HTTPException(status_code=503, detail="Explanation service not configured.")
-
-    class_name = body.get("class_name", "")
-    confidence = body.get("confidence", 0)
-    probs      = body.get("probabilities", {})
 
     top_probs = ", ".join(
         f"{k} {v*100:.1f}%"
-        for k, v in sorted(probs.items(), key=lambda x: x[1], reverse=True)[:3]
+        for k, v in sorted(body.probabilities.items(), key=lambda x: x[1], reverse=True)[:3]
     )
 
     prompt = (
         f"A retinal fundus image was analyzed by an AI model for diabetic retinopathy screening. "
-        f"Prediction: {class_name} with {confidence*100:.1f}% confidence. "
+        f"Prediction: {body.class_name} with {body.confidence*100:.1f}% confidence. "
         f"Top probabilities: {top_probs}. "
         f"Write a 3-sentence clinical explanation covering: what this diagnosis means, "
-        f"what retinal features are typically associated with {class_name}, "
+        f"what retinal features are typically associated with {body.class_name}, "
         f"and what follow-up action is recommended."
     )
 
-    def call_hf():
-        client = InferenceClient(token=hf_token, timeout=20)
-        return client.text_generation(
-            prompt,
-            model="google/flan-t5-base",
-            max_new_tokens=150
-        )
-
     try:
-        text = await asyncio.wait_for(asyncio.to_thread(call_hf), timeout=25)
+        text = await asyncio.wait_for(
+            asyncio.to_thread(client.text_generation, prompt, model=EXPLAIN_MODEL, max_new_tokens=150),
+            timeout=25,
+        )
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Model took too long to respond — please try again.")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"HF API error: {str(e)}")
+    except Exception:
+        logger.exception("HF inference call failed")
+        raise HTTPException(status_code=502, detail="Explanation service error.")
 
     if not text or not text.strip():
-        raise HTTPException(status_code=500, detail="Empty response from language model.")
+        raise HTTPException(status_code=502, detail="Empty response from language model.")
 
-    return {"explanation": text.strip()}
+    return ExplainResponse(explanation=text.strip())

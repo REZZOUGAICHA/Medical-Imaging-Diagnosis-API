@@ -1,34 +1,20 @@
-"""
-Shared fixtures and session-level mock setup.
-
-Why the module-level patch?
-  api.py runs `model, device = load_model(SAVE_PATH)` at import time.
-  If load_model runs for real it needs best_model.pth, which doesn't exist in CI.
-  By patching src.predict.load_model *before* any test file imports src.api,
-  the `from src.predict import load_model` line inside api.py picks up the mock.
-"""
 import io
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 import torch
+from fastapi.testclient import TestClient
 from PIL import Image
-from unittest.mock import patch
 
 from src.model import build_model
 
-# Build a real EfficientNet-B4 with ImageNet weights but WITHOUT the custom
-# DR fine-tuned weights (pretrained=False skips loading best_model.pth).
-# This gives us a properly-shaped model that supports real forward passes
-# and Grad-CAM (which needs model.features[-1] to exist).
+# real EfficientNet-B4 architecture but random weights, so no best_model.pth needed.
+# the model is loaded in the app lifespan, so the client fixtures patch the loader
+# and use `with TestClient(app)` to trigger startup
 _model = build_model(pretrained=False)
 _model.eval()
 _device = torch.device("cpu")
-
-# Start the patch at module level — conftest.py is fully executed before
-# pytest imports any test_*.py file, so api.py hasn't been imported yet.
-_patcher = patch("src.predict.load_model", return_value=(_model, _device))
-_patcher.start()
 
 
 @pytest.fixture(scope="session")
@@ -39,6 +25,26 @@ def model():
 @pytest.fixture(scope="session")
 def device():
     return _device
+
+
+@pytest.fixture
+def client(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    from src.api import app
+    with patch("src.api.download_weights"), \
+         patch("src.api.load_model", return_value=(_model, _device)):
+        with TestClient(app) as c:
+            yield c
+
+
+@pytest.fixture
+def client_model_failed(monkeypatch):
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    from src.api import app
+    with patch("src.api.download_weights"), \
+         patch("src.api.load_model", side_effect=RuntimeError("weights corrupt")):
+        with TestClient(app) as c:
+            yield c
 
 
 @pytest.fixture
