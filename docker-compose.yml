@@ -9,6 +9,7 @@ services:
       - PYTHONUNBUFFERED=1
       # Values are read from .env (see .env.example)
       - HF_TOKEN=${HF_TOKEN:-}
+      - EXPLAIN_MODEL=${EXPLAIN_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     restart: unless-stopped

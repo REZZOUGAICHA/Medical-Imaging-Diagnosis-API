@@ -44,6 +44,7 @@ class ExplainRequest(BaseModel):
 
 class ExplainResponse(BaseModel):
     explanation: str
+    model: str
 
 
 class ErrorResponse(BaseModel):

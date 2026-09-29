@@ -34,7 +34,7 @@ setup_logging()
 logger = logging.getLogger("api")
 
 HF_REPO_ID       = "aicharzg/diabetic-retinopathy-efficientnet-b4"
-EXPLAIN_MODEL    = "google/flan-t5-base"
+EXPLAIN_MODEL    = os.environ.get("EXPLAIN_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 ALLOWED_TYPES    = {"image/jpeg", "image/png"}
 DISCLAIMER       = "This tool is for research purposes only and does not constitute medical advice."
@@ -217,21 +217,25 @@ async def explain_endpoint(request: Request, body: ExplainRequest):
     )
 
     prompt = (
-        f"A retinal fundus image was analyzed by an AI model for diabetic retinopathy screening. "
-        f"Prediction: {body.class_name} with {body.confidence*100:.1f}% confidence. "
+        f"A retinal fundus image was graded by a deep learning model for diabetic retinopathy. "
+        f"Prediction: {body.class_name} ({body.confidence*100:.1f}% confidence). "
         f"Top probabilities: {top_probs}. "
-        f"Write a 3-sentence clinical explanation covering: what this diagnosis means, "
-        f"what retinal features are typically associated with {body.class_name}, "
-        f"and what follow-up action is recommended."
+        f"In 3 sentences, explain what this grade means, which retinal findings are typically "
+        f"associated with it, and what follow-up is usually recommended."
     )
+    messages = [
+        {"role": "system", "content": "You write short, factual notes for clinicians. No markdown, no lists."},
+        {"role": "user", "content": prompt},
+    ]
 
     try:
-        text = await asyncio.wait_for(
-            asyncio.to_thread(client.text_generation, prompt, model=EXPLAIN_MODEL, max_new_tokens=150),
+        completion = await asyncio.wait_for(
+            asyncio.to_thread(client.chat_completion, messages, model=EXPLAIN_MODEL, max_tokens=200),
             timeout=25,
         )
+        text = completion.choices[0].message.content
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Model took too long to respond — please try again.")
+        raise HTTPException(status_code=504, detail="Model took too long to respond, please try again.")
     except Exception:
         logger.exception("HF inference call failed")
         raise HTTPException(status_code=502, detail="Explanation service error.")
@@ -239,4 +243,4 @@ async def explain_endpoint(request: Request, body: ExplainRequest):
     if not text or not text.strip():
         raise HTTPException(status_code=502, detail="Empty response from language model.")
 
-    return ExplainResponse(explanation=text.strip())
+    return ExplainResponse(explanation=text.strip(), model=EXPLAIN_MODEL)

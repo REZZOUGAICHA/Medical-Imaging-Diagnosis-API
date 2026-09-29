@@ -145,7 +145,8 @@ def test_explain_validates_missing_class_name(client):
 
 def test_explain_success_with_mock_client(client):
     fake = MagicMock()
-    fake.text_generation.return_value = "  Mild DR means early changes.  "
+    fake.chat_completion.return_value.choices = [MagicMock()]
+    fake.chat_completion.return_value.choices[0].message.content = "  Mild DR means early changes.  "
     app.state.hf_client = fake
     resp = client.post(
         "/explain",
@@ -153,11 +154,12 @@ def test_explain_success_with_mock_client(client):
     )
     assert resp.status_code == 200
     assert resp.json()["explanation"] == "Mild DR means early changes."
+    assert resp.json()["model"]
 
 
 def test_explain_upstream_error_is_generic(client):
     fake = MagicMock()
-    fake.text_generation.side_effect = RuntimeError("401 token hf_abc invalid")
+    fake.chat_completion.side_effect = RuntimeError("401 token hf_abc invalid")
     app.state.hf_client = fake
     resp = client.post("/explain", json={"class_name": "Mild DR", "confidence": 0.8})
     assert resp.status_code == 502

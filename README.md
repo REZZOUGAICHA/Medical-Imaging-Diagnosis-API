@@ -2,9 +2,9 @@
 
 ![CI](https://github.com/REZZOUGAICHA/Medical-Imaging-Diagnosis-API/actions/workflows/ci.yml/badge.svg)
 
-A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, a Grad-CAM heatmap, and an AI-generated clinical explanation powered by Flan-T5-Base.
+A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, a Grad-CAM heatmap, and an optional LLM-written clinical note (Llama 3.1 8B via Hugging Face Inference Providers).
 
-Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a medical web UI, full monitoring via Prometheus and Grafana, 33 tests, and a GitHub Actions CI pipeline.
+Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 33 tests, and a GitHub Actions CI pipeline.
 
 **Model performance (held-out test split, 366 images):** accuracy **78.7%**, quadratic weighted kappa **0.863**, macro-F1 **0.608**. See [Model Performance](#model-performance).
 
@@ -23,10 +23,10 @@ Client (browser or API)
 ┌──────────────────────────────────────────┐
 │              FastAPI  :8000              │
 │                                          │
-│  GET  /          → Medical web UI        │
+│  GET  /          → Web UI                │
 │  POST /predict   → EfficientNet-B4       │    ┌──────────────────────┐
 │                    + Grad-CAM heatmap ───┼───▶│  HF Hub              │
-│  POST /explain   → Flan-T5-Base NLP      │    │  best_model.pth      │
+│  POST /explain   → LLM clinical note     │    │  best_model.pth      │
 │  GET  /metrics   → Prometheus scrape     │    └──────────────────────┘
 └──────────────────────────────────────────┘
         │  scrape /metrics every 15s
@@ -43,8 +43,8 @@ Client (browser or API)
 
 - **5-class DR classification** — No DR / Mild / Moderate / Severe / Proliferative
 - **Grad-CAM explainability** — heatmap overlay showing which retinal regions drove the prediction
-- **AI clinical explanation** — Flan-T5-Base generates a natural language report for each prediction
-- **Medical web UI** — drag-and-drop upload, color-coded severity, probability bars, side-by-side image comparison
+- **LLM clinical note**: an instruct model (configurable, Llama 3.1 8B by default) writes a short plain-language summary of each prediction
+- **Web UI**: image viewer with an Original / Grad-CAM toggle (heatmap aligned to the photo), grade on the 0–4 scale, class probabilities, request ID and latency, light and dark mode
 - **Prometheus + Grafana monitoring** — latency, request counts, per-class prediction counts, confidence distribution
 - **Production serving** — model loaded in FastAPI `lifespan`, inference off the event loop, typed request/response schemas, upload size cap, split liveness/readiness probes
 - **Structured JSON logging** — every log line and error response carries an `X-Request-ID`
@@ -88,7 +88,8 @@ cp .env.example .env
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `HF_TOKEN` | Enables `POST /explain` (Flan-T5-Base) | unset → `/explain` returns 503 |
+| `HF_TOKEN` | Enables `POST /explain`. Needs the *Make calls to Inference Providers* permission | unset → `/explain` returns 503 |
+| `EXPLAIN_MODEL` | Chat model used by `/explain` | `meta-llama/Llama-3.1-8B-Instruct` |
 | `MAX_UPLOAD_MB` | Upload size cap for `/predict` | `10` |
 | `LOG_LEVEL` | Log verbosity | `INFO` |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Grafana login | password required |
@@ -99,12 +100,12 @@ The container runs as a non-root user (uid 1000). If you bind-mount `./models` o
 
 ## Web UI
 
-Open **http://localhost:8000** for the interactive medical interface:
+Open **http://localhost:8000**:
 
-1. Drag and drop a retinal fundus image (JPEG or PNG)
-2. The model returns predicted DR severity + confidence + probability distribution
-3. Grad-CAM heatmap shows which retinal regions drove the prediction
-4. Click **Generate AI Clinical Explanation** for a Flan-T5-Base natural language report
+1. Drop, choose or paste a fundus image (JPEG or PNG)
+2. The side panel shows the predicted grade on the 0–4 scale, confidence and all class probabilities
+3. Switch the viewer to **Grad-CAM** to see which regions drove the prediction. The heatmap is computed on the 224 × 224 model input and stretched back to the photo's aspect ratio so it lines up
+4. **Generate note** asks the LLM for a short plain-language summary
 
 ---
 
@@ -173,7 +174,7 @@ img.show()
 ```
 
 ### `POST /explain`
-Sends prediction data to Flan-T5-Base and returns a natural language clinical explanation.
+Sends the prediction to a chat model through Hugging Face Inference Providers and returns a short plain-language note.
 
 **Request:**
 ```bash
@@ -185,7 +186,8 @@ curl -X POST http://localhost:8000/explain \
 **Response:**
 ```json
 {
-  "explanation": "Moderate non-proliferative diabetic retinopathy indicates..."
+  "explanation": "Moderate non-proliferative diabetic retinopathy indicates...",
+  "model": "meta-llama/Llama-3.1-8B-Instruct"
 }
 ```
 
@@ -311,7 +313,7 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 │   ├── load_test.py    # Traffic generator for the Grafana dashboard
 │   └── smoke_predict.py # Manual end-to-end check against a running server
 ├── static/
-│   └── index.html      # Medical web UI
+│   └── index.html      # Web UI
 ├── tests/
 │   ├── conftest.py     # Shared fixtures + model mock
 │   ├── test_api.py     # FastAPI endpoint tests
@@ -342,7 +344,7 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 | CV Model | EfficientNet-B4 (PyTorch) |
 | API | FastAPI + uvicorn |
 | Explainability | Grad-CAM (pytorch-grad-cam) |
-| NLP Explanation | Flan-T5-Base (Hugging Face Inference API) |
+| Clinical note | Llama 3.1 8B Instruct (Hugging Face Inference Providers) |
 | Web UI | Vanilla HTML/CSS/JS (served by FastAPI) |
 | Containerization | Docker + Docker Compose |
 | Monitoring | Prometheus + Grafana |
