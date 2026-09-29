@@ -10,7 +10,7 @@ Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](ht
 
 > **Disclaimer:** This tool is for research purposes only and does not constitute medical advice.
 
-**Live demo:** https://medical-imaging-diagnosis-api-production.up.railway.app
+**Demo:** runs locally with one command, see [Quick Start](#quick-start).
 
 ---
 
@@ -347,5 +347,5 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 | Containerization | Docker + Docker Compose |
 | Monitoring | Prometheus + Grafana |
 | Model Hosting | Hugging Face Hub |
-| CI/CD | GitHub Actions + Railway |
+| CI/CD | GitHub Actions |
 | Dataset | [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Kaggle) |
