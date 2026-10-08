@@ -194,3 +194,15 @@ def test_rate_limit_is_per_client_ip(client, jpeg_bytes):
         b = client.post("/predict", files={"file": ("x.jpg", jpeg_bytes, "image/jpeg")},
                         headers={"X-Forwarded-For": "2.2.2.2"})
     assert (a.status_code, b.status_code) == (200, 200)
+
+
+def test_samples_are_served(client):
+    manifest = client.get("/samples/samples.json")
+    assert manifest.status_code == 200
+    samples = manifest.json()["samples"]
+    assert samples and all(0 <= s["grade"] <= 4 for s in samples)
+    for s in samples:
+        for name in (s["file"], s["thumb"]):
+            resp = client.get(f"/samples/{name}")
+            assert resp.status_code == 200
+            assert resp.headers["content-type"] == "image/jpeg"

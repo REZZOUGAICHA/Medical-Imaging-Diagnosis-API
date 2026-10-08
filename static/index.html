@@ -126,10 +126,27 @@
   }
   .frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: block; }
 
-  .dropzone { text-align: center; max-width: 340px; }
+  .dropzone { text-align: center; max-width: 420px; }
   .dropzone p:first-child { color: #e6e7e8; font-size: 15px; margin-bottom: 4px; }
   .dropzone p + p { font-size: 13px; }
   .dropzone .btn { margin-top: 20px; }
+
+  .samples { margin-top: 32px; }
+  .samples-label { font-size: 13px; color: #e6e7e8; margin-bottom: 10px; }
+  .samples-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .sample {
+    background: none; border: 1px solid var(--viewer-line); border-radius: 4px;
+    padding: 4px 4px 2px; color: var(--viewer-ink); font-size: 11px;
+    display: grid; gap: 3px; justify-items: center;
+  }
+  .sample img { width: 72px; height: 48px; object-fit: cover; border-radius: 2px; display: block; }
+  .sample:hover { border-color: var(--viewer-ink); color: #fff; }
+  .sample:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .samples-credit { font-size: 11px; margin-top: 10px; }
+  .samples-credit a { color: var(--viewer-ink); }
+
+  .expert { font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+  .expert b { font-weight: 500; color: var(--ink); }
 
   .progress {
     position: absolute; left: 0; right: 0; top: 0; height: 2px;
@@ -143,8 +160,9 @@
   @keyframes slide { from { left: -30%; } to { left: 100%; } }
 
   .stage-note {
-    position: absolute; left: 24px; bottom: 16px;
-    font-size: 12px; color: var(--viewer-ink);
+    position: absolute; left: 24px; bottom: 16px; right: 24px; width: fit-content;
+    font-size: 12px; color: #e6e7e8;
+    background: rgba(10, 10, 11, 0.72); padding: 3px 8px; border-radius: 3px;
   }
 
   .viewer-bar {
@@ -271,6 +289,11 @@
         <p>Drop a fundus photograph here</p>
         <p>JPEG or PNG, up to 10 MB. You can also paste an image.</p>
         <button class="btn btn-primary" id="chooseBtn" type="button">Choose file</button>
+        <div class="samples" id="samples" hidden>
+          <p class="samples-label">No fundus photo at hand? Try a sample:</p>
+          <div class="samples-row" id="samplesRow"></div>
+          <p class="samples-credit">Expert-graded images from <a href="https://ieee-dataport.org/node/956" target="_blank" rel="noopener">IDRiD</a> (CC BY 4.0), never seen in training.</p>
+        </div>
       </div>
 
       <div class="frame" id="frame" hidden>
@@ -287,6 +310,7 @@
       </div>
       <span class="file mono" id="fileInfo"></span>
       <span class="spacer"></span>
+      <button class="link-btn" type="button" id="samplesBtn" hidden>Samples</button>
       <button class="link-btn" type="button" id="replaceBtn" hidden>Upload another</button>
     </div>
 
@@ -299,7 +323,7 @@
         <div class="label">About</div>
         <p>Grades diabetic retinopathy from a single fundus photograph on the 5-point international scale, from 0 (none) to 4 (proliferative), and shows which regions of the image drove the prediction.</p>
         <p id="privacyNote" hidden>The model runs in your browser. The image is never uploaded.</p>
-        <p class="muted">Upload an image to see the result here.</p>
+        <p class="muted">Upload an image, or try one of the samples, to see the result here.</p>
       </div>
       <div class="section">
         <div class="label">Held-out test set, 366 images</div>
@@ -309,6 +333,15 @@
           <dt>Macro F1</dt><dd>0.608</dd>
         </dl>
         <p class="muted" style="font-size:12px;margin-top:10px">Severe and proliferative cases are the weakest classes (recall 8/17 and 15/33).</p>
+      </div>
+      <div class="section">
+        <div class="label">External check: IDRiD, 516 images, other hospital and camera</div>
+        <dl class="facts mono">
+          <dt>Accuracy</dt><dd>45.2%</dd>
+          <dt>Quadratic kappa</dt><dd>0.684</dd>
+          <dt>Referable DR</dt><dd>77% sensitivity, 92% specificity</dd>
+        </dl>
+        <p class="muted" style="font-size:12px;margin-top:10px">Performance drops on data from a new site, mostly by one grade. A research demo, not a screening tool.</p>
       </div>
     </div>
 
@@ -322,6 +355,7 @@
         <div class="label">Predicted grade</div>
         <div class="grade-name" id="gradeName"></div>
         <div class="grade-meta mono" id="gradeMeta"></div>
+        <p class="expert mono" id="expertGrade" hidden></p>
         <div class="scale" id="scale"><div></div><div></div><div></div><div></div><div></div></div>
         <div class="scale-labels mono" id="scaleLabels">
           <span>0</span><span>1</span><span>2</span><span>3</span><span>4</span>
@@ -633,6 +667,57 @@
 
   checkStatus();
 
+  // ---- sample images (static/samples, listed in samples.json) ----
+
+  let currentSample = null;
+  let hasSamples = false;
+
+  async function loadSamples() {
+    try {
+      const r = await fetch("samples/samples.json");
+      if (!r.ok) return;
+      const { samples } = await r.json();
+      for (const sample of samples) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "sample";
+        btn.innerHTML = '<img alt=""><span class="mono"></span>';
+        btn.querySelector("img").src = "samples/" + sample.thumb;
+        btn.querySelector("span").textContent = `Grade ${sample.grade}`;
+        btn.title = `${sample.id}: expert grade ${sample.grade}, ${CLASS_NAMES[sample.grade]}`;
+        btn.setAttribute("aria-label", `Sample ${sample.id}, expert grade ${sample.grade}`);
+        btn.onclick = () => runSample(sample);
+        $("samplesRow").appendChild(btn);
+      }
+      hasSamples = samples.length > 0;
+      show($("samples"), hasSamples);
+    } catch {
+      // samples are optional
+    }
+  }
+
+  async function runSample(sample) {
+    try {
+      const r = await fetch("samples/" + sample.file);
+      if (!r.ok) throw new Error();
+      const blob = await r.blob();
+      analyse(new File([blob], sample.file, { type: "image/jpeg" }), sample);
+    } catch {
+      showError("Could not load the sample image.");
+    }
+  }
+
+  loadSamples();
+
+  $("samplesBtn").onclick = () => {
+    show($("frame"), false);
+    show($("camNote"), false);
+    show($("dropzone"));
+    $("fileInfo").textContent = "";
+    $("viewCam").disabled = true;
+    $("viewOriginal").disabled = true;
+  };
+
   // file input, drag and drop, paste
   $("chooseBtn").onclick = () => $("fileInput").click();
   $("replaceBtn").onclick = () => $("fileInput").click();
@@ -673,7 +758,8 @@
     $("errorText").textContent = message;
   }
 
-  async function analyse(file) {
+  async function analyse(file, sample = null) {
+    currentSample = sample;
     if (!["image/jpeg", "image/png"].includes(file.type)) {
       showError("Only JPEG and PNG images are supported.");
       return;
@@ -696,6 +782,7 @@
 
     show($("dropzone"), false);
     show($("replaceBtn"));
+    show($("samplesBtn"), hasSamples);
     setView("original");
     $("viewCam").disabled = true;
     $("viewOriginal").disabled = true;
@@ -736,6 +823,18 @@
     $("gradeName").textContent = data.class_name;
     $("gradeMeta").textContent = `Grade ${grade} of 4  ·  ${(data.confidence * 100).toFixed(1)}% confidence`;
     $("advice").textContent = data.description;
+
+    // samples carry the IDRiD expert grade, so show how the model did
+    show($("expertGrade"), Boolean(currentSample));
+    if (currentSample) {
+      const g = currentSample.grade;
+      const verdict = g === grade ? "matches" : `${Math.abs(g - grade)} grade${Math.abs(g - grade) > 1 ? "s" : ""} off`;
+      $("expertGrade").innerHTML = "";
+      $("expertGrade").append("Expert grade (IDRiD): ");
+      const b = document.createElement("b");
+      b.textContent = `${g} · ${CLASS_NAMES[g]}`;
+      $("expertGrade").append(b, `  ·  ${verdict}`);
+    }
 
     [...$("scale").children].forEach((seg, i) => {
       seg.style.background = i === grade ? `var(${GRADE_COLORS[i]})` : "";

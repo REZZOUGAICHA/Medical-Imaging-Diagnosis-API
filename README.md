@@ -4,13 +4,17 @@
 
 A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, a Grad-CAM heatmap, and an optional LLM-written clinical note (Llama 3.1 8B via Hugging Face Inference Providers).
 
-Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 40 tests, and a GitHub Actions pipeline that tests and deploys it.
+Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 41 tests, and a GitHub Actions pipeline that tests and deploys it.
 
-**Model performance (held-out test split, 366 images):** accuracy **78.7%**, quadratic weighted kappa **0.863**, macro-F1 **0.608**. See [Model Performance](#model-performance).
+**Model performance:** on the held-out APTOS test split (366 images) accuracy **78.7%**, quadratic weighted kappa **0.863**. On **IDRiD**, an external dataset from a different hospital and camera (516 images), kappa drops to **0.684** and accuracy to **45.2%**; referable-DR sensitivity / specificity there is **77% / 92%**. See [Model Performance](#model-performance) and [External validation](#external-validation-idrid).
 
 > **Disclaimer:** This tool is for research purposes only and does not constitute medical advice.
 
 **Live demo: [retinal-dr-grading.netlify.app](https://retinal-dr-grading.netlify.app)** — the model runs in your browser, the image is never uploaded. Full API with interactive docs: [la-rezzoug--dr-grading.modal.run/docs](https://la-rezzoug--dr-grading.modal.run/docs) (may take ~15 s to wake up). How it is hosted: [Deployment](#deployment). To run everything locally, see [Quick Start](#quick-start).
+
+![Severe DR sample graded in the browser, Grad-CAM view](docs/screenshots/gradcam.png)
+
+<sub>Sample IDRiD_115 (expert grade 3, Severe). The model, which never saw IDRiD, grades it Severe and the Grad-CAM heat sits on the hard-exudate fields. Image: IDRiD, CC BY 4.0, see [Data and licences](#data-and-licences).</sub>
 
 ### Ways to run it
 
@@ -51,6 +55,8 @@ Client (browser or API)
 
 - **5-class DR classification** — No DR / Mild / Moderate / Severe / Proliferative
 - **Grad-CAM explainability** — heatmap overlay showing which retinal regions drove the prediction
+- **Sample images** — four expert-graded IDRiD photos (grades 0, 2, 3, 4) in the UI, so visitors can try it without their own fundus image; the result shows the expert grade next to the model's
+- **External validation** — evaluated on all 516 IDRiD images (never used in training), with bootstrap confidence intervals
 - **LLM clinical note**: an instruct model writes a short plain-language summary of each prediction. Hugging Face Inference Providers by default, or any OpenAI-compatible API (e.g. Groq's free tier) via `EXPLAIN_BASE_URL`
 - **Web UI**: image viewer with an Original / Grad-CAM toggle (heatmap aligned to the photo), grade on the 0–4 scale, class probabilities, request ID and latency, light and dark mode
 - **Prometheus + Grafana monitoring** — latency, request counts, per-class prediction counts, confidence distribution
@@ -58,7 +64,7 @@ Client (browser or API)
 - **Structured JSON logging** — every log line and error response carries an `X-Request-ID`
 - **In-browser inference** — ONNX export with Grad-CAM built into the graph, run by ONNX Runtime Web; same grades as the server on the test set (see [Deployment](#deployment))
 - **Public-demo ready** — CORS allow-list for a separately hosted frontend, per-IP rate limit on the inference endpoints
-- **40 tests** — model architecture, inference logic, API endpoints, validation, rate limiting, ONNX export equivalence, LLM provider wiring and error paths
+- **41 tests** — model architecture, inference logic, API endpoints, validation, rate limiting, ONNX export equivalence, LLM provider wiring, sample serving and error paths
 - **GitHub Actions CI/CD** — tests on every push, then redeploys the API to Modal
 - **One-command Docker deployment** — `docker-compose up --build`
 
@@ -116,12 +122,16 @@ The container runs as a non-root user (uid 1000). If you bind-mount `./models` o
 
 ## Web UI
 
-Open **http://localhost:8000**:
+Open the [live demo](https://retinal-dr-grading.netlify.app), or **http://localhost:8000** when running locally:
 
-1. Drop, choose or paste a fundus image (JPEG or PNG)
-2. The side panel shows the predicted grade on the 0–4 scale, confidence and all class probabilities
+1. Drop, choose or paste a fundus image (JPEG or PNG), or click one of the **samples**
+2. The side panel shows the predicted grade on the 0–4 scale, confidence and all class probabilities. For a sample it also shows the expert grade and whether the model matches it
 3. Switch the viewer to **Grad-CAM** to see which regions drove the prediction. The heatmap is computed on the 224 × 224 model input and stretched back to the photo's aspect ratio so it lines up
-4. **Generate note** asks the LLM for a short plain-language summary
+4. **Generate note** asks the LLM for a short plain-language summary. The prompt tells it the scores are the model's certainty, not the patient's risk, and the code flags close calls (top two grades within 15 points) so the note says the model was uncertain
+
+| Start screen with samples | Clinical note (dark mode) | Phone |
+|---|---|---|
+| ![Start screen](docs/screenshots/landing.png) | ![Clinical note](docs/screenshots/clinical-note.png) | ![Phone layout](docs/screenshots/mobile.png) |
 
 ---
 
@@ -244,7 +254,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-40 tests covering model architecture, inference logic, the ONNX export (logits and Grad-CAM maps match PyTorch), all API endpoints, readiness when the model fails to load, upload size limits, spoofed content types, request validation, per-IP rate limiting, and that internal error text never reaches the client. No model weights needed — the model loader is patched in the test fixtures.
+41 tests covering model architecture, inference logic, the ONNX export (logits and Grad-CAM maps match PyTorch), all API endpoints, readiness when the model fails to load, upload size limits, spoofed content types, request validation, per-IP rate limiting, and that internal error text never reaches the client. No model weights needed — the model loader is patched in the test fixtures.
 
 Manual smoke test against a running server:
 
@@ -278,6 +288,48 @@ Quadratic weighted kappa is the APTOS 2019 competition metric: it penalises a pr
 | **Proliferative** (33) | 0 | 3 | 9 | 6 | **15** |
 
 No DR vs DR is separated well (195/199) and most mistakes are one grade off, which is why kappa is high. The weak point is the rare classes: Severe DR recall is 8/17, Proliferative 15/33, and 3 Proliferative cases were predicted as Mild. Those are the errors that would matter clinically, so this is a research demo and not a screening tool.
+
+### External validation (IDRiD)
+
+The APTOS test split comes from the same source as the training data, so it says little about a new clinic. To check that, the model was run unchanged on **IDRiD** (Indian Diabetic Retinopathy Image Dataset): 516 expert-graded photos from a different hospital, population and camera (Kowa VX-10α, 4288 × 2848), none of which were used in training.
+
+```bash
+python -m scripts.evaluate_external --root "data/B. Disease Grading" --out reports/idrid.json
+```
+
+| | APTOS test (internal) | IDRiD, all 516 (external) | IDRiD official test, 103 |
+|---|---|---|---|
+| Accuracy | 78.7% | **45.2%** (95% CI 40.9–49.4) | 41.7% (32.0–51.5) |
+| Quadratic weighted kappa | 0.863 | **0.684** (0.632–0.733) | 0.542 (0.381–0.678) |
+| Referable DR sensitivity (grade ≥ 2) | — | **77.1%** (72.5–81.4) | 75.0% (63.9–85.3) |
+| Referable DR specificity | — | **91.7%** (87.4–95.4) | 82.1% (69.7–93.0) |
+
+95% intervals from 2000 bootstrap resamples. Full output in [reports/idrid.json](reports/idrid.json).
+
+**IDRiD confusion matrix, all 516** (rows = expert grade, columns = predicted):
+
+| | No DR | Mild | Moderate | Severe | Proliferative |
+|---|---|---|---|---|---|
+| **No DR** (168) | **86** | 68 | 7 | 5 | 2 |
+| **Mild** (25) | 10 | **13** | 2 | 0 | 0 |
+| **Moderate** (168) | 12 | 51 | **82** | 19 | 4 |
+| **Severe** (93) | 1 | 6 | 39 | **38** | 9 |
+| **Proliferative** (62) | 1 | 3 | 17 | 27 | **14** |
+
+What it shows:
+
+- **There is a real domain shift.** Accuracy falls from 79% to 45%. Kappa holds up better (0.68) because most errors are still one grade off.
+- **The errors have a direction.** Healthy eyes are often called Mild (68 of 168), and Severe and Proliferative cases are graded too low. On a new site the model would over-flag healthy patients for monitoring and under-call advanced disease.
+- **As a referral filter it is more usable than the 5-class accuracy suggests.** 77% of eyes needing referral are flagged, and 92% of those that don't are cleared. That is still below what a screening programme needs.
+- **Cropping the black border was tested and is not the cause.** IDRiD frames have wide margins, so the retina is smaller after resizing. Cropping to the retina first, decided on IDRiD's training split and APTOS only, moved IDRiD-train kappa from 0.715 to 0.738 with no change in accuracy (46.0%), and left APTOS essentially unchanged (kappa 0.863 → 0.868, accuracy 78.7% → 78.1%). The gap is more likely camera colour, illumination and population, which calls for training on more sites or colour normalisation rather than a preprocessing tweak.
+
+### Limitations
+
+- Trained on one dataset (APTOS 2019). The external result above is the realistic expectation for a new clinic.
+- Mild DR is the least reliable grade: 13 of 25 correct on IDRiD, 19 of 30 on APTOS, and on IDRiD many healthy eyes are pulled into it.
+- Grad-CAM here is a 7 × 7 map stretched over the photo: it shows roughly where the model looked, not lesion outlines. On several IDRiD Mild cases the heat lands on the notch in the top-right corner of the camera frame, which is an artefact, not retina.
+- On at least one APTOS Proliferative case the heat sits on what look like laser-treatment scars, so the model may partly be learning "already treated" rather than the disease itself. One image is not proof; it is a hypothesis worth testing.
+- The clinical note is written by a general-purpose LLM and is not reviewed by a clinician.
 
 ---
 
@@ -341,7 +393,7 @@ RATE_LIMIT_PER_MINUTE=10
 # so the live demo uses Groq's free API (no card) instead:
 EXPLAIN_BASE_URL=https://api.groq.com/openai/v1
 EXPLAIN_API_KEY=gsk_...
-EXPLAIN_MODEL=openai/gpt-oss-20b
+EXPLAIN_MODEL=openai/gpt-oss-120b
 EXPLAIN_MAX_TOKENS=600
 EXPLAIN_REASONING_EFFORT=low
 ```
@@ -349,6 +401,13 @@ EXPLAIN_REASONING_EFFORT=low
 The API is then at `https://<workspace>--dr-grading.modal.run`, with `/docs` live. After an idle period the first request waits for a cold start.
 
 **Auto-deploy:** add repo secrets `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` and a repo variable `DEPLOY_MODAL=true` in GitHub. The `deploy-modal` job in CI then redeploys after every green push to `main`.
+
+---
+
+## Data and licences
+
+- **APTOS 2019** (training and internal test): Kaggle competition data, usable for non-commercial, academic and educational purposes; the rules forbid redistributing it. No APTOS images are included in this repository or its screenshots.
+- **IDRiD** (external validation, web UI samples, screenshots): P. Porwal, S. Pachade, R. Kamble, M. Kokare, G. Deshmukh, V. Sahasrabuddhe, F. Meriaudeau, *Indian Diabetic Retinopathy Image Dataset (IDRiD)*, IEEE Dataport, 2018, DOI [10.21227/H25W98](https://doi.org/10.21227/H25W98). Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The four sample images in [static/samples](static/samples) were resized; details in [static/samples/CREDITS.md](static/samples/CREDITS.md).
 
 ---
 
@@ -397,11 +456,16 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 │   └── train.py        # Training pipeline
 ├── scripts/
 │   ├── evaluate.py     # Accuracy / QWK / F1 on a labelled split
+│   ├── evaluate_external.py # External validation on IDRiD, with bootstrap CIs
 │   ├── export_onnx.py  # ONNX export with Grad-CAM maps, for the browser demo
 │   ├── load_test.py    # Traffic generator for the Grafana dashboard
 │   └── smoke_predict.py # Manual end-to-end check against a running server
 ├── static/
-│   └── index.html      # Web UI
+│   ├── index.html      # Web UI
+│   └── samples/        # IDRiD sample images (CC BY 4.0) + samples.json
+├── docs/screenshots/   # README screenshots
+├── reports/
+│   └── idrid.json      # External validation metrics
 ├── tests/
 │   ├── conftest.py     # Shared fixtures + model mock
 │   ├── test_api.py     # FastAPI endpoint tests
@@ -409,7 +473,7 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 │   ├── test_predict.py # Inference logic tests
 │   └── test_onnx.py    # ONNX export matches PyTorch and Grad-CAM
 ├── models/             # Model weights (not tracked in git)
-├── data/               # APTOS 2019 dataset (not tracked in git)
+├── data/               # APTOS 2019 and IDRiD (not tracked in git)
 ├── monitoring/
 │   ├── prometheus.yml  # Prometheus scrape config
 │   └── grafana/        # Grafana datasource + dashboard provisioning

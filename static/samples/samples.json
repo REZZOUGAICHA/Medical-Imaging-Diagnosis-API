@@ -1,0 +1,29 @@
+{
+  "source": "IDRiD (Porwal et al.), CC BY 4.0, resized",
+  "samples": [
+    {
+      "id": "IDRiD_213",
+      "file": "IDRiD_213.jpg",
+      "thumb": "IDRiD_213_thumb.jpg",
+      "grade": 0
+    },
+    {
+      "id": "IDRiD_343",
+      "file": "IDRiD_343.jpg",
+      "thumb": "IDRiD_343_thumb.jpg",
+      "grade": 2
+    },
+    {
+      "id": "IDRiD_115",
+      "file": "IDRiD_115.jpg",
+      "thumb": "IDRiD_115_thumb.jpg",
+      "grade": 3
+    },
+    {
+      "id": "IDRiD_067",
+      "file": "IDRiD_067.jpg",
+      "thumb": "IDRiD_067_thumb.jpg",
+      "grade": 4
+    }
+  ]
+}

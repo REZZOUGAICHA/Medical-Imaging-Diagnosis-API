@@ -12,6 +12,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from huggingface_hub import InferenceClient, hf_hub_download
 from PIL import Image, UnidentifiedImageError
 from prometheus_client import Counter, Histogram
@@ -186,6 +187,14 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         content={"detail": exc.detail, "request_id": request_id_var.get()},
         headers=exc.headers,
     )
+
+
+# sample fundus images for the web UI (IDRiD, CC BY 4.0, see static/samples/CREDITS.md)
+app.mount(
+    "/samples",
+    StaticFiles(directory=os.path.join(ROOT_DIR, "static", "samples"), check_dir=False),
+    name="samples",
+)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
