@@ -29,6 +29,7 @@ env/
 
 # ── Environment variables ─────────────────────────────────────────────────────
 .env
+deploy.env
 .env.local
 .env.*.local
 

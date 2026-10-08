@@ -37,6 +37,12 @@ logger = logging.getLogger("api")
 
 HF_REPO_ID       = "aicharzg/diabetic-retinopathy-efficientnet-b4"
 EXPLAIN_MODEL    = os.environ.get("EXPLAIN_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+# Optional: any OpenAI-compatible endpoint instead of HF Inference Providers,
+# e.g. https://api.groq.com/openai/v1 with EXPLAIN_API_KEY and EXPLAIN_MODEL set
+EXPLAIN_BASE_URL = os.environ.get("EXPLAIN_BASE_URL")
+# reasoning models spend part of the budget thinking, so allow more for them
+EXPLAIN_MAX_TOKENS = int(os.environ.get("EXPLAIN_MAX_TOKENS", "200"))
+EXPLAIN_REASONING_EFFORT = os.environ.get("EXPLAIN_REASONING_EFFORT")
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 ALLOWED_TYPES    = {"image/jpeg", "image/png"}
 # comma-separated origins allowed to call the API from a browser, e.g. the
@@ -53,6 +59,14 @@ def download_weights():
     hf_hub_download(repo_id=HF_REPO_ID, filename="best_model.pth", local_dir=MODELS_DIR)
 
 
+def make_explain_client():
+    if EXPLAIN_BASE_URL:
+        key = os.environ.get("EXPLAIN_API_KEY")
+        return InferenceClient(base_url=EXPLAIN_BASE_URL, api_key=key, timeout=20) if key else None
+    hf_token = os.environ.get("HF_TOKEN")
+    return InferenceClient(token=hf_token, timeout=20) if hf_token else None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.model = None
@@ -65,8 +79,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Could not load model")
 
-    hf_token = os.environ.get("HF_TOKEN")
-    app.state.hf_client = InferenceClient(token=hf_token, timeout=20) if hf_token else None
+    app.state.hf_client = make_explain_client()
 
     # per-IP limit on the expensive endpoints, 0 disables it
     app.state.rate_limit = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "0"))
@@ -277,7 +290,10 @@ async def explain_endpoint(request: Request, body: ExplainRequest):
 
     try:
         completion = await asyncio.wait_for(
-            asyncio.to_thread(client.chat_completion, messages, model=EXPLAIN_MODEL, max_tokens=200),
+            asyncio.to_thread(
+                client.chat_completion, messages, model=EXPLAIN_MODEL, max_tokens=EXPLAIN_MAX_TOKENS,
+                extra_body={"reasoning_effort": EXPLAIN_REASONING_EFFORT} if EXPLAIN_REASONING_EFFORT else None,
+            ),
             timeout=25,
         )
         text = completion.choices[0].message.content

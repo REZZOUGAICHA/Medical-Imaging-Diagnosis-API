@@ -4,13 +4,21 @@
 
 A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, a Grad-CAM heatmap, and an optional LLM-written clinical note (Llama 3.1 8B via Hugging Face Inference Providers).
 
-Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 38 tests, and a GitHub Actions pipeline that tests and deploys it.
+Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 40 tests, and a GitHub Actions pipeline that tests and deploys it.
 
 **Model performance (held-out test split, 366 images):** accuracy **78.7%**, quadratic weighted kappa **0.863**, macro-F1 **0.608**. See [Model Performance](#model-performance).
 
 > **Disclaimer:** This tool is for research purposes only and does not constitute medical advice.
 
 **Live demo: [retinal-dr-grading.netlify.app](https://retinal-dr-grading.netlify.app)** — the model runs in your browser, the image is never uploaded. Full API with interactive docs: [la-rezzoug--dr-grading.modal.run/docs](https://la-rezzoug--dr-grading.modal.run/docs) (may take ~15 s to wake up). How it is hosted: [Deployment](#deployment). To run everything locally, see [Quick Start](#quick-start).
+
+### Ways to run it
+
+| | What you get | How |
+|---|---|---|
+| **Live demo** (portfolio) | Web UI, model runs in the browser, LLM note via the hosted API | [retinal-dr-grading.netlify.app](https://retinal-dr-grading.netlify.app), see [Deployment](#deployment) |
+| **Docker Compose** (full stack, local) | API + web UI + Prometheus + Grafana dashboard | `docker-compose up --build`, see [Quick Start](#quick-start) |
+| **Modal** (hosted API) | The same FastAPI app with live `/docs` | `modal deploy deploy/modal_app.py`, see [Full API (Modal)](#full-api-modal) |
 
 ---
 
@@ -43,14 +51,14 @@ Client (browser or API)
 
 - **5-class DR classification** — No DR / Mild / Moderate / Severe / Proliferative
 - **Grad-CAM explainability** — heatmap overlay showing which retinal regions drove the prediction
-- **LLM clinical note**: an instruct model (configurable, Llama 3.1 8B by default) writes a short plain-language summary of each prediction
+- **LLM clinical note**: an instruct model writes a short plain-language summary of each prediction. Hugging Face Inference Providers by default, or any OpenAI-compatible API (e.g. Groq's free tier) via `EXPLAIN_BASE_URL`
 - **Web UI**: image viewer with an Original / Grad-CAM toggle (heatmap aligned to the photo), grade on the 0–4 scale, class probabilities, request ID and latency, light and dark mode
 - **Prometheus + Grafana monitoring** — latency, request counts, per-class prediction counts, confidence distribution
 - **Production serving** — model loaded in FastAPI `lifespan`, inference off the event loop, typed request/response schemas, upload size cap, split liveness/readiness probes
 - **Structured JSON logging** — every log line and error response carries an `X-Request-ID`
 - **In-browser inference** — ONNX export with Grad-CAM built into the graph, run by ONNX Runtime Web; same grades as the server on the test set (see [Deployment](#deployment))
 - **Public-demo ready** — CORS allow-list for a separately hosted frontend, per-IP rate limit on the inference endpoints
-- **38 tests** — model architecture, inference logic, API endpoints, validation, rate limiting, ONNX export equivalence and error paths
+- **40 tests** — model architecture, inference logic, API endpoints, validation, rate limiting, ONNX export equivalence, LLM provider wiring and error paths
 - **GitHub Actions CI/CD** — tests on every push, then redeploys the API to Modal
 - **One-command Docker deployment** — `docker-compose up --build`
 
@@ -92,6 +100,10 @@ cp .env.example .env
 |----------|---------|---------|
 | `HF_TOKEN` | Enables `POST /explain`. Needs the *Make calls to Inference Providers* permission | unset → `/explain` returns 503 |
 | `EXPLAIN_MODEL` | Chat model used by `/explain` | `meta-llama/Llama-3.1-8B-Instruct` |
+| `EXPLAIN_BASE_URL` | Use an OpenAI-compatible API instead of HF, e.g. `https://api.groq.com/openai/v1` | unset → HF Inference Providers |
+| `EXPLAIN_API_KEY` | Key for `EXPLAIN_BASE_URL` | — |
+| `EXPLAIN_MAX_TOKENS` | Token budget for the note (raise it for reasoning models) | `200` |
+| `EXPLAIN_REASONING_EFFORT` | Sent as `reasoning_effort` when set (e.g. `low` for gpt-oss) | unset |
 | `MAX_UPLOAD_MB` | Upload size cap for `/predict` | `10` |
 | `LOG_LEVEL` | Log verbosity | `INFO` |
 | `ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS (e.g. your Netlify URL) | empty → same-origin only |
@@ -232,7 +244,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-38 tests covering model architecture, inference logic, the ONNX export (logits and Grad-CAM maps match PyTorch), all API endpoints, readiness when the model fails to load, upload size limits, spoofed content types, request validation, per-IP rate limiting, and that internal error text never reaches the client. No model weights needed — the model loader is patched in the test fixtures.
+40 tests covering model architecture, inference logic, the ONNX export (logits and Grad-CAM maps match PyTorch), all API endpoints, readiness when the model fails to load, upload size limits, spoofed content types, request validation, per-IP rate limiting, and that internal error text never reaches the client. No model weights needed — the model loader is patched in the test fixtures.
 
 Manual smoke test against a running server:
 
@@ -316,9 +328,22 @@ The first visit downloads the model (~67 MB) and the browser caches it after tha
 ```bash
 pip install modal
 modal setup                                            # log in once
-modal secret create dr-grading HF_TOKEN=hf_xxx \
-    ALLOWED_ORIGINS=https://<your-site>.netlify.app RATE_LIMIT_PER_MINUTE=10
+modal secret create dr-grading --from-dotenv deploy.env   # keys below
 modal deploy deploy/modal_app.py
+```
+
+`deploy.env` (not committed):
+
+```
+ALLOWED_ORIGINS=https://<your-site>.netlify.app
+RATE_LIMIT_PER_MINUTE=10
+# LLM note. HF's free tier only includes $0.10/month of inference credit,
+# so the live demo uses Groq's free API (no card) instead:
+EXPLAIN_BASE_URL=https://api.groq.com/openai/v1
+EXPLAIN_API_KEY=gsk_...
+EXPLAIN_MODEL=openai/gpt-oss-20b
+EXPLAIN_MAX_TOKENS=600
+EXPLAIN_REASONING_EFFORT=low
 ```
 
 The API is then at `https://<workspace>--dr-grading.modal.run`, with `/docs` live. After an idle period the first request waits for a cold start.

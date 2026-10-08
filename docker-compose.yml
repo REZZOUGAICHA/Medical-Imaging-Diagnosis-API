@@ -10,6 +10,10 @@ services:
       # Values are read from .env (see .env.example)
       - HF_TOKEN=${HF_TOKEN:-}
       - EXPLAIN_MODEL=${EXPLAIN_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+      - EXPLAIN_BASE_URL=${EXPLAIN_BASE_URL:-}
+      - EXPLAIN_API_KEY=${EXPLAIN_API_KEY:-}
+      - EXPLAIN_MAX_TOKENS=${EXPLAIN_MAX_TOKENS:-200}
+      - EXPLAIN_REASONING_EFFORT=${EXPLAIN_REASONING_EFFORT:-}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
