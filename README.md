@@ -10,7 +10,7 @@ Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](ht
 
 > **Disclaimer:** This tool is for research purposes only and does not constitute medical advice.
 
-**Demo:** online with the model running **in your browser** (the image is never uploaded), with the full API on Modal; or locally with one command, see [Quick Start](#quick-start). How it is hosted: [Deployment](#deployment).
+**Live demo: [retinal-dr-grading.netlify.app](https://retinal-dr-grading.netlify.app)** — the model runs in your browser, the image is never uploaded. Full API with interactive docs: [la-rezzoug--dr-grading.modal.run/docs](https://la-rezzoug--dr-grading.modal.run/docs) (may take ~15 s to wake up). How it is hosted: [Deployment](#deployment). To run everything locally, see [Quick Start](#quick-start).
 
 ---
 

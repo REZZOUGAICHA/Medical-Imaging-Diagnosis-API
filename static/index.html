@@ -790,7 +790,9 @@
       show($("noteFoot"));
       btn.textContent = "Regenerate";
     } catch (err) {
-      $("noteError").textContent = err.message;
+      $("noteError").textContent = err instanceof TypeError
+        ? "Could not reach the API. If it was idle it may take a minute to wake up, please try again."
+        : err.message;
       show($("noteError"));
       btn.textContent = "Try again";
     } finally {
