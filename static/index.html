@@ -396,11 +396,16 @@
   // model status in the header
   async function checkStatus() {
     if (IN_BROWSER) {
-      try {
-        await getSession();
-        setStatus("ready", "Model ready, on device");
-      } catch {
-        setStatus("down", "Model failed to load");
+      // a dropped download shouldn't leave the page dead: retry a few times
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await getSession();
+          return;
+        } catch (err) {
+          console.error("Model load failed", err);
+          setStatus("down", attempt < 3 ? "Model failed to load, retrying" : "Model failed to load, reload the page");
+          await new Promise((r) => setTimeout(r, 2000 * attempt));
+        }
       }
       return;
     }
@@ -459,7 +464,10 @@
         ort.env.wasm.wasmPaths = ORT_CDN;
         const bytes = await downloadModel();
         setStatus("loading", "Starting model");
-        return ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+        const session = await ort.InferenceSession.create(bytes, { executionProviders: ["wasm"] });
+        // also covers a load that succeeds later, e.g. retried by an upload
+        setStatus("ready", "Model ready, on device");
+        return session;
       })();
       sessionPromise.catch(() => { sessionPromise = null; });
     }

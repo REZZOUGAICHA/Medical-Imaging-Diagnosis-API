@@ -271,15 +271,21 @@ async def explain_endpoint(request: Request, body: ExplainRequest):
     if client is None:
         raise HTTPException(status_code=503, detail="Explanation service not configured.")
 
-    top_probs = ", ".join(
-        f"{k} {v*100:.1f}%"
-        for k, v in sorted(body.probabilities.items(), key=lambda x: x[1], reverse=True)[:3]
+    ranked = sorted(body.probabilities.items(), key=lambda x: x[1], reverse=True)
+    top_probs = ", ".join(f"{k} {v*100:.1f}%" for k, v in ranked[:3])
+    # decided here rather than left to the LLM, which tends to ignore it
+    close_call = (
+        f"The model was uncertain between {ranked[0][0]} and {ranked[1][0]}; say so in the first sentence. "
+        if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < 0.15 else ""
     )
 
+    # the scores are the classifier's softmax outputs, not a clinical risk. Without
+    # saying so, models restate "49% confidence" as "a 49% chance of disease".
     prompt = (
         f"A retinal fundus image was graded by a deep learning model for diabetic retinopathy. "
-        f"Prediction: {body.class_name} ({body.confidence*100:.1f}% confidence). "
-        f"Top probabilities: {top_probs}. "
+        f"Predicted grade: {body.class_name}. Model scores: {top_probs}. "
+        f"These scores reflect the model's certainty, not the patient's risk; do not restate them "
+        f"as a chance, likelihood or risk. {close_call}"
         f"In 3 sentences, explain what this grade means, which retinal findings are typically "
         f"associated with it, and what follow-up is usually recommended."
     )
