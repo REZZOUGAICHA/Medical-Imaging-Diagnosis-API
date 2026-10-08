@@ -230,6 +230,10 @@ Once the stack is running, open Grafana at http://localhost:3000 with the creden
 
 The Prometheus datasource and a **Medical Imaging API** dashboard are provisioned automatically (Dashboards → Medical Imaging API). It shows request rate, `/predict` p50/p95 latency, error rate, predictions per DR grade and the confidence distribution.
 
+![Grafana dashboard after a load test](docs/screenshots/grafana.png)
+
+<sub>After `python -m scripts.load_test --n 50`. The load test also sends a few deliberately bad files (wrong type, corrupt PNG), which show up as the small 4xx curve; they are rejected with 400.</sub>
+
 To put some traffic through it (needs the APTOS test images in `data/`):
 
 ```bash
