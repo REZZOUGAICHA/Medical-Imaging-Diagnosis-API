@@ -57,7 +57,7 @@ Client (browser or API)
 - **Grad-CAM explainability** — heatmap overlay showing which retinal regions drove the prediction
 - **Sample images** — four expert-graded IDRiD photos (grades 0, 2, 3, 4) in the UI, so visitors can try it without their own fundus image; the result shows the expert grade next to the model's
 - **External validation** — evaluated on all 516 IDRiD images (never used in training), with bootstrap confidence intervals
-- **LLM clinical note**: an instruct model writes a short plain-language summary of each prediction. Hugging Face Inference Providers by default, or any OpenAI-compatible API (e.g. Groq's free tier) via `EXPLAIN_BASE_URL`
+- **LLM clinical note**: an instruct model writes a short plain-language summary of each prediction. Hugging Face Inference Providers by default, or any OpenAI-compatible API (e.g. Groq) via `EXPLAIN_BASE_URL`
 - **Web UI**: image viewer with an Original / Grad-CAM toggle (heatmap aligned to the photo), grade on the 0–4 scale, class probabilities, request ID and latency, light and dark mode
 - **Prometheus + Grafana monitoring** — latency, request counts, per-class prediction counts, confidence distribution
 - **Production serving** — model loaded in FastAPI `lifespan`, inference off the event loop, typed request/response schemas, upload size cap, split liveness/readiness probes
@@ -339,7 +339,7 @@ What it shows:
 
 ## Deployment
 
-Two free deployments, no server bill and no credit card:
+This is a portfolio project, built to practise taking an ML model from training to a public deployment. The live version is split across two services: the web UI on **Netlify**, with the model running in the browser, and the full FastAPI service on **Modal**. The clinical note is generated through **Groq**'s OpenAI-compatible API.
 
 ```
 Netlify  (static/index.html, inference="browser")
@@ -379,7 +379,7 @@ The first visit downloads the model (~67 MB) and the browser caches it after tha
 
 ### Full API (Modal)
 
-[deploy/modal_app.py](deploy/modal_app.py) runs the same FastAPI app on [Modal](https://modal.com), which has a free monthly credit on its Starter plan. The weights are baked into the image, the app scales to zero when idle, and one container at most keeps spend bounded.
+[deploy/modal_app.py](deploy/modal_app.py) runs the same FastAPI app on [Modal](https://modal.com). The weights are baked into the image, the app scales to zero when idle, and one container at most keeps spend bounded.
 
 ```bash
 pip install modal
@@ -393,8 +393,7 @@ modal deploy deploy/modal_app.py
 ```
 ALLOWED_ORIGINS=https://<your-site>.netlify.app
 RATE_LIMIT_PER_MINUTE=10
-# LLM note. HF's free tier only includes $0.10/month of inference credit,
-# so the live demo uses Groq's free API (no card) instead:
+# LLM note: the live demo uses Groq's OpenAI-compatible API
 EXPLAIN_BASE_URL=https://api.groq.com/openai/v1
 EXPLAIN_API_KEY=gsk_...
 EXPLAIN_MODEL=openai/gpt-oss-120b
