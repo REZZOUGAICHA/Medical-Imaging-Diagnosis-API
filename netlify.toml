@@ -1,0 +1,20 @@
+# Static demo: the model runs in the visitor's browser (ONNX Runtime Web),
+# so there is no backend to host for predictions.
+# Optional: set API_BASE_URL (Site configuration -> Environment variables) to the
+# Modal URL to enable the LLM clinical note and the API docs link.
+[build]
+  publish = "static"
+  command = '''
+    sed -i 's#<meta name="inference" content="server">#<meta name="inference" content="browser">#' static/index.html
+    grep -q '<meta name="inference" content="browser">' static/index.html
+    if [ -n "$API_BASE_URL" ]; then
+      sed -i "s#<meta name=\"api-base\" content=\"\">#<meta name=\"api-base\" content=\"$API_BASE_URL\">#" static/index.html
+      grep -q "content=\"$API_BASE_URL\"" static/index.html
+    fi
+  '''
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"

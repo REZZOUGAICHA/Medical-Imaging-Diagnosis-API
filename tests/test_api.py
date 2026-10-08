@@ -164,3 +164,33 @@ def test_explain_upstream_error_is_generic(client):
     resp = client.post("/explain", json={"class_name": "Mild DR", "confidence": 0.8})
     assert resp.status_code == 502
     assert "hf_abc" not in resp.json()["detail"]
+
+
+def test_rate_limit_off_by_default(client, jpeg_bytes):
+    with patch("src.api.predict_with_explainability", return_value=_FAKE_RESULT):
+        for _ in range(5):
+            resp = client.post("/predict", files={"file": ("x.jpg", jpeg_bytes, "image/jpeg")})
+            assert resp.status_code == 200
+
+
+def test_rate_limit_returns_429(client, jpeg_bytes):
+    client.app.state.rate_limit = 2
+    with patch("src.api.predict_with_explainability", return_value=_FAKE_RESULT):
+        codes = [
+            client.post("/predict", files={"file": ("x.jpg", jpeg_bytes, "image/jpeg")}).status_code
+            for _ in range(3)
+        ]
+    assert codes == [200, 200, 429]
+    resp = client.post("/predict", files={"file": ("x.jpg", jpeg_bytes, "image/jpeg")})
+    assert "Retry-After" in resp.headers
+    assert "request_id" in resp.json()
+
+
+def test_rate_limit_is_per_client_ip(client, jpeg_bytes):
+    client.app.state.rate_limit = 1
+    with patch("src.api.predict_with_explainability", return_value=_FAKE_RESULT):
+        a = client.post("/predict", files={"file": ("x.jpg", jpeg_bytes, "image/jpeg")},
+                        headers={"X-Forwarded-For": "1.1.1.1"})
+        b = client.post("/predict", files={"file": ("x.jpg", jpeg_bytes, "image/jpeg")},
+                        headers={"X-Forwarded-For": "2.2.2.2"})
+    assert (a.status_code, b.status_code) == (200, 200)

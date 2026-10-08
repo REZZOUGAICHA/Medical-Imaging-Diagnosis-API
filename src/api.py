@@ -4,11 +4,13 @@ import logging
 import os
 import time
 import uuid
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from huggingface_hub import InferenceClient, hf_hub_download
 from PIL import Image, UnidentifiedImageError
@@ -37,6 +39,9 @@ HF_REPO_ID       = "aicharzg/diabetic-retinopathy-efficientnet-b4"
 EXPLAIN_MODEL    = os.environ.get("EXPLAIN_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_MB", "10")) * 1024 * 1024
 ALLOWED_TYPES    = {"image/jpeg", "image/png"}
+# comma-separated origins allowed to call the API from a browser, e.g. the
+# Netlify frontend. Empty means same-origin only (UI served by this app).
+ALLOWED_ORIGINS  = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 DISCLAIMER       = "This tool is for research purposes only and does not constitute medical advice."
 
 
@@ -63,6 +68,10 @@ async def lifespan(app: FastAPI):
     hf_token = os.environ.get("HF_TOKEN")
     app.state.hf_client = InferenceClient(token=hf_token, timeout=20) if hf_token else None
 
+    # per-IP limit on the expensive endpoints, 0 disables it
+    app.state.rate_limit = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "0"))
+    app.state.rate_hits = defaultdict(deque)
+
     yield
 
 
@@ -72,6 +81,15 @@ app = FastAPI(
     version="1.1.0",
     lifespan=lifespan,
 )
+
+if ALLOWED_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=ALLOWED_ORIGINS,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
+    )
 
 # Wire up automatic HTTP metrics (latency, request count, in-flight)
 # and expose them at GET /metrics for Prometheus to scrape.
@@ -96,7 +114,34 @@ confidence_histogram = Histogram(
     buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 )
 
-ERROR_RESPONSES = {code: {"model": ErrorResponse} for code in (400, 413, 500, 502, 503, 504)}
+ERROR_RESPONSES = {code: {"model": ErrorResponse} for code in (400, 413, 429, 500, 502, 503, 504)}
+
+
+def client_ip(request: Request) -> str:
+    # behind the HF Spaces / Netlify proxy the real client is the first X-Forwarded-For entry
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(request: Request):
+    """Sliding one-minute window per client IP. In-memory, so it assumes a single worker."""
+    limit = request.app.state.rate_limit
+    if limit <= 0:
+        return
+    now = time.monotonic()
+    hits = request.app.state.rate_hits[client_ip(request)]
+    while hits and now - hits[0] > 60:
+        hits.popleft()
+    if len(hits) >= limit:
+        retry_after = int(60 - (now - hits[0])) + 1
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests, please wait a minute.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    hits.append(now)
 
 
 @app.middleware("http")
@@ -169,7 +214,8 @@ def model_info():
     }
 
 
-@app.post("/predict", response_model=PredictResponse, responses=ERROR_RESPONSES)
+@app.post("/predict", response_model=PredictResponse, responses=ERROR_RESPONSES,
+          dependencies=[Depends(rate_limit)])
 async def predict_endpoint(request: Request, file: UploadFile = File(...)):
     model, device = request.app.state.model, request.app.state.device
     if model is None:
@@ -205,7 +251,8 @@ async def predict_endpoint(request: Request, file: UploadFile = File(...)):
     return PredictResponse(success=True, disclaimer=DISCLAIMER, **result)
 
 
-@app.post("/explain", response_model=ExplainResponse, responses=ERROR_RESPONSES)
+@app.post("/explain", response_model=ExplainResponse, responses=ERROR_RESPONSES,
+          dependencies=[Depends(rate_limit)])
 async def explain_endpoint(request: Request, body: ExplainRequest):
     client = request.app.state.hf_client
     if client is None:

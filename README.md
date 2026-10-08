@@ -4,13 +4,13 @@
 
 A production-ready REST API for **diabetic retinopathy severity classification** from retinal fundus images. Returns a diagnosis, confidence score, a Grad-CAM heatmap, and an optional LLM-written clinical note (Llama 3.1 8B via Hugging Face Inference Providers).
 
-Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 33 tests, and a GitHub Actions CI pipeline.
+Built with EfficientNet-B4 fine-tuned on the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection/data) dataset. Ships with a web UI, full monitoring via Prometheus and Grafana, 38 tests, and a GitHub Actions pipeline that tests and deploys it.
 
 **Model performance (held-out test split, 366 images):** accuracy **78.7%**, quadratic weighted kappa **0.863**, macro-F1 **0.608**. See [Model Performance](#model-performance).
 
 > **Disclaimer:** This tool is for research purposes only and does not constitute medical advice.
 
-**Demo:** runs locally with one command, see [Quick Start](#quick-start).
+**Demo:** online with the model running **in your browser** (the image is never uploaded), with the full API on Modal; or locally with one command, see [Quick Start](#quick-start). How it is hosted: [Deployment](#deployment).
 
 ---
 
@@ -48,8 +48,10 @@ Client (browser or API)
 - **Prometheus + Grafana monitoring** — latency, request counts, per-class prediction counts, confidence distribution
 - **Production serving** — model loaded in FastAPI `lifespan`, inference off the event loop, typed request/response schemas, upload size cap, split liveness/readiness probes
 - **Structured JSON logging** — every log line and error response carries an `X-Request-ID`
-- **33 tests** — model architecture, inference logic, API endpoints, validation and error paths
-- **GitHub Actions CI** — tests run automatically on every push
+- **In-browser inference** — ONNX export with Grad-CAM built into the graph, run by ONNX Runtime Web; same grades as the server on the test set (see [Deployment](#deployment))
+- **Public-demo ready** — CORS allow-list for a separately hosted frontend, per-IP rate limit on the inference endpoints
+- **38 tests** — model architecture, inference logic, API endpoints, validation, rate limiting, ONNX export equivalence and error paths
+- **GitHub Actions CI/CD** — tests on every push, then redeploys the API to Modal
 - **One-command Docker deployment** — `docker-compose up --build`
 
 ---
@@ -92,6 +94,8 @@ cp .env.example .env
 | `EXPLAIN_MODEL` | Chat model used by `/explain` | `meta-llama/Llama-3.1-8B-Instruct` |
 | `MAX_UPLOAD_MB` | Upload size cap for `/predict` | `10` |
 | `LOG_LEVEL` | Log verbosity | `INFO` |
+| `ALLOWED_ORIGINS` | Comma-separated browser origins allowed by CORS (e.g. your Netlify URL) | empty → same-origin only |
+| `RATE_LIMIT_PER_MINUTE` | Max `/predict` + `/explain` calls per client IP per minute (429 when exceeded) | `0` → off |
 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | Grafana login | password required |
 
 The container runs as a non-root user (uid 1000). If you bind-mount `./models` on Linux, make sure it is writable by that uid so the first-boot weight download succeeds.
@@ -135,7 +139,7 @@ Readiness — the model is loaded and inference is possible. Returns **503** unt
 Returns model metadata and class labels.
 
 ### `POST /predict`
-Accepts a retinal fundus image (JPEG or PNG, max 10 MB) and returns a diagnosis. The `Content-Type` header is only a first filter — the file must actually decode as a JPEG or PNG. Returns 400 for invalid images, 413 for oversized uploads, 503 if the model isn't loaded.
+Accepts a retinal fundus image (JPEG or PNG, max 10 MB) and returns a diagnosis. The `Content-Type` header is only a first filter — the file must actually decode as a JPEG or PNG. Returns 400 for invalid images, 413 for oversized uploads, 429 when the rate limit is hit, 503 if the model isn't loaded.
 
 **Request:**
 ```bash
@@ -228,7 +232,7 @@ pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-33 tests covering model architecture, inference logic, all API endpoints, readiness when the model fails to load, upload size limits, spoofed content types, request validation, and that internal error text never reaches the client. No model weights needed — the model loader is patched in the test fixtures.
+38 tests covering model architecture, inference logic, the ONNX export (logits and Grad-CAM maps match PyTorch), all API endpoints, readiness when the model fails to load, upload size limits, spoofed content types, request validation, per-IP rate limiting, and that internal error text never reaches the client. No model weights needed — the model loader is patched in the test fixtures.
 
 Manual smoke test against a running server:
 
@@ -262,6 +266,64 @@ Quadratic weighted kappa is the APTOS 2019 competition metric: it penalises a pr
 | **Proliferative** (33) | 0 | 3 | 9 | 6 | **15** |
 
 No DR vs DR is separated well (195/199) and most mistakes are one grade off, which is why kappa is high. The weak point is the rare classes: Severe DR recall is 8/17, Proliferative 15/33, and 3 Proliferative cases were predicted as Mild. Those are the errors that would matter clinically, so this is a research demo and not a screening tool.
+
+---
+
+## Deployment
+
+Two free deployments, no server bill and no credit card:
+
+```
+Netlify  (static/index.html, inference="browser")
+   │  model: dr_efficientnet_b4.onnx from HF Hub, run with ONNX Runtime Web (WebAssembly)
+   │
+   └── POST /explain only ──▶  Modal  (deploy/modal_app.py, the full FastAPI app)
+                                       /predict  /explain  /docs  /metrics  and the UI in server mode
+```
+
+### Browser inference (Netlify)
+
+The PyTorch model is exported to ONNX with [scripts/export_onnx.py](scripts/export_onnx.py). The graph returns the class logits **and a class activation map for every grade**, so the browser can show the heatmap without backpropagation.
+
+That is exact, not an approximation. The head is `avgpool → dropout → linear`, so the gradient of a class score with respect to the last feature maps is `W[c,k] / (H·W)` at every position. Grad-CAM's channel weights are therefore just the linear weights, and the map is `ReLU(Σₖ W[c,k]·Aₖ)`. [tests/test_onnx.py](tests/test_onnx.py) checks this against Grad-CAM computed with autograd.
+
+Checks on the export:
+
+| Check | Result |
+|-------|--------|
+| ONNX vs PyTorch logits | match to 1e-4 ([tests/test_onnx.py](tests/test_onnx.py)) |
+| ONNX on the test split (`python -m scripts.evaluate --split test --onnx models/dr_efficientnet_b4.onnx`) | accuracy 78.7%, QWK 0.863, macro-F1 0.608, identical confusion matrix |
+| Browser (Chrome) vs server, real test images | same grade on **366 / 366** test images; browser accuracy 78.7%, QWK 0.863 |
+
+Getting the browser to agree with the server needed one non-obvious fix: the browser's own canvas scaling gave a different grade on 2 of the first 3 test photos. Fundus photos are ~2000 px and the model sees 224 px, and canvas downscaling skips most source pixels, while PIL (used in training) averages all of them. The page now decodes the raw pixels and runs a port of PIL's bilinear resampling.
+
+To set it up:
+
+1. Export and upload the model once:
+   ```bash
+   python -m scripts.export_onnx                      # writes models/dr_efficientnet_b4.onnx (~67 MB)
+   huggingface-cli upload aicharzg/diabetic-retinopathy-efficientnet-b4 models/dr_efficientnet_b4.onnx dr_efficientnet_b4.onnx
+   ```
+2. Import the GitHub repo in Netlify. [`netlify.toml`](netlify.toml) switches the page to browser mode.
+3. Optional: set `API_BASE_URL` in Netlify to the Modal URL below. That enables the LLM clinical note and the API docs link; without it those are hidden and everything else works.
+
+The first visit downloads the model (~67 MB) and the browser caches it after that. A prediction then takes about a second on a laptop.
+
+### Full API (Modal)
+
+[deploy/modal_app.py](deploy/modal_app.py) runs the same FastAPI app on [Modal](https://modal.com), which has a free monthly credit on its Starter plan. The weights are baked into the image, the app scales to zero when idle, and one container at most keeps spend bounded.
+
+```bash
+pip install modal
+modal setup                                            # log in once
+modal secret create dr-grading HF_TOKEN=hf_xxx \
+    ALLOWED_ORIGINS=https://<your-site>.netlify.app RATE_LIMIT_PER_MINUTE=10
+modal deploy deploy/modal_app.py
+```
+
+The API is then at `https://<workspace>--dr-grading.modal.run`, with `/docs` live. After an idle period the first request waits for a cold start.
+
+**Auto-deploy:** add repo secrets `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` and a repo variable `DEPLOY_MODAL=true` in GitHub. The `deploy-modal` job in CI then redeploys after every green push to `main`.
 
 ---
 
@@ -310,6 +372,7 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 │   └── train.py        # Training pipeline
 ├── scripts/
 │   ├── evaluate.py     # Accuracy / QWK / F1 on a labelled split
+│   ├── export_onnx.py  # ONNX export with Grad-CAM maps, for the browser demo
 │   ├── load_test.py    # Traffic generator for the Grafana dashboard
 │   └── smoke_predict.py # Manual end-to-end check against a running server
 ├── static/
@@ -318,15 +381,19 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 │   ├── conftest.py     # Shared fixtures + model mock
 │   ├── test_api.py     # FastAPI endpoint tests
 │   ├── test_model.py   # Model architecture tests
-│   └── test_predict.py # Inference logic tests
+│   ├── test_predict.py # Inference logic tests
+│   └── test_onnx.py    # ONNX export matches PyTorch and Grad-CAM
 ├── models/             # Model weights (not tracked in git)
 ├── data/               # APTOS 2019 dataset (not tracked in git)
 ├── monitoring/
 │   ├── prometheus.yml  # Prometheus scrape config
 │   └── grafana/        # Grafana datasource + dashboard provisioning
+├── deploy/
+│   └── modal_app.py    # Full API on Modal
+├── netlify.toml        # Frontend build for Netlify
 ├── .github/
 │   └── workflows/
-│       └── ci.yml      # GitHub Actions CI pipeline
+│       └── ci.yml      # Tests, then deploy to Modal
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
@@ -350,4 +417,6 @@ The best checkpoint is saved to `models/best_model.pth` when validation loss imp
 | Monitoring | Prometheus + Grafana |
 | Model Hosting | Hugging Face Hub |
 | CI/CD | GitHub Actions |
+| Browser inference | ONNX Runtime Web (WebAssembly) |
+| Hosting | Netlify (static demo) + Modal (API) |
 | Dataset | [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) (Kaggle) |

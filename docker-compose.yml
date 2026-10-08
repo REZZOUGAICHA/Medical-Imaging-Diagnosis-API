@@ -12,6 +12,8 @@ services:
       - EXPLAIN_MODEL=${EXPLAIN_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-10}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-0}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready', timeout=4)"]
